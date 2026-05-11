@@ -16,6 +16,7 @@ It's for founders, makers, solo operators, and small teams who already think in 
 
 ## What you get
 
+- **The agent plans for you.** Talk through an idea in plain English. The agent asks the right questions, carves it into tasks and subtasks, sets dependencies, and writes the plan onto the board. You stop being the project manager.
 - **One place for everything.** Ideas, tasks, decisions, and finished work all live in one board. No more chasing TODOs across Slack, docs, and twelve open tabs.
 - **Agents do the boring parts.** Flip a task to `Exec=Agent` and an AI handles it end-to-end: form fills, post drafts, directory submissions, log-and-close work.
 - **Right model for the job.** Mechanical work runs on fast, cheap models. Heavy thinking goes to bigger ones. You don't pay flagship rates for clerical tasks.
@@ -27,9 +28,9 @@ It's for founders, makers, solo operators, and small teams who already think in 
 ## How it works (30 seconds)
 
 1. **Suggest** an idea. It lands in the Notion inbox.
-2. **Discuss** to clarify scope and break it into subtasks if needed.
-3. **Approve** when you're ready. The task moves to To-Do.
-4. **Run.** Agents pick up `Exec=Agent` rows, work in parallel, and close them with result links.
+2. **Discuss** with the agent. It asks clarifying questions, then writes out subtasks and dependencies on the row.
+3. **Approve** when you're ready. The task and its subtasks move to To-Do.
+4. **Run.** Agents pick up `Exec=Agent` rows, work in parallel (respecting dependencies), and close them with result links.
 
 That's the whole loop. The board is the source of truth; the agent is just an executor.
 
