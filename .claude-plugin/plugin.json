@@ -1,0 +1,11 @@
+{
+  "name": "agency-os",
+  "version": "0.1.0",
+  "description": "Notion-as-source-of-truth dispatch board with Haiku subagent execution for 5-10x cost savings.",
+  "author": "AutomateLab",
+  "license": "MIT",
+  "homepage": "https://github.com/ratamaha-git/agency-os",
+  "skills": [
+    "./.claude/skills/agency-os/"
+  ]
+}

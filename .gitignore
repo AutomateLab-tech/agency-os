@@ -1,0 +1,14 @@
+node_modules/
+.env
+
+# agency-os runtime state (generated, never committed)
+.claude/skills/agency-os/state/todo-ids.json
+.claude/skills/agency-os/references/notion-cache.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/

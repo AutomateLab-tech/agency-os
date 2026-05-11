@@ -1,0 +1,8 @@
+# Intended GitHub topics (to be applied by orchestrator via `gh repo create --topic`)
+# Apply these topics when creating the remote GitHub repository
+
+- claude-code-plugin
+- claude-code-skill
+- claude-skills
+- notion
+- agent
