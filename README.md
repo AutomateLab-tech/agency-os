@@ -1,97 +1,72 @@
 # agency-os
 
-agency-os: Notion-as-source-of-truth dispatch board for agencies and operators running AI workflows.
+> Run your work like a small AI agency, from a single Notion board.
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
-<!-- TODO: add marketplace badge once listed -->
 
 ---
 
-## Why
+## What it is
 
-Operators running AI workflows drown in TODOs spread across chat threads, docs, and spreadsheets. Nothing has a clear owner, a clear status, or a clear "done." Work gets lost or re-discovered instead of executed.
+agency-os turns Notion into the dashboard of your own AI agency. You drop ideas in. They get clarified, scheduled, and executed by AI agents. Finished work lands back in Notion with links to whatever shipped - posts, submissions, drafts, reports.
 
-Notion is the one tool that's already open, already organized, and already trusted as the source of truth in most agencies. agency-os puts a structured work board inside Notion - a Tasks database with a defined status flow, corpus pages for grouping work by domain, and a General Guidance page for project-wide rules. The board doesn't replace how you think; it just makes the queue inspectable and executable.
-
-Agents pick up tasks gated by `Exec=Agent`. That gate is operator-set, not automatic - the operator marks rows when they're confident the task can run end-to-end without human intervention. This keeps the queue honest: no surprise autonomous execution, no tasks that silently stall.
-
-Model choice happens per task at dispatch time. Haiku for mechanical work (form filings, template-driven posts, log-and-close mutations), Sonnet for substantive drafting and judgment calls, Opus rarely and only when the reasoning is genuinely hard. Token spend scales with task complexity, not workflow size.
+It's for founders, makers, solo operators, and small teams who already think in Notion and want their AI tools to actually ship things, not just talk about them.
 
 ---
 
-## Quick start
+## What you get
 
-```bash
-# 1. Install the plugin
-/plugin install https://github.com/your-org/agency-os  # TODO: update URL when repo is public
-
-# 2. Set your Notion integration token
-echo "NOTION_KEY=secret_..." >> .env
-
-# 3. Scaffold the workspace (idempotent)
-/agency-os scaffold
-
-# 4. Define your first corpus and suggest a task
-/agency-os add-corpus "My Work" --goal "Ship X"
-/agency-os suggest "My first task" --corpus="My Work"
-
-# 5. Run the full flow
-/agency-os discuss <id>    # clarify
-/agency-os approve <id>    # schedule
-/agency-os start <id>      # load brief + begin
-```
-
-See [docs/quickstart.md](docs/quickstart.md) for a step-by-step walkthrough with a worked example.
+- **One place for everything.** Ideas, tasks, decisions, and finished work all live in one board. No more chasing TODOs across Slack, docs, and twelve open tabs.
+- **Agents do the boring parts.** Flip a task to `Exec=Agent` and an AI handles it end-to-end: form fills, post drafts, directory submissions, log-and-close work.
+- **Right model for the job.** Mechanical work runs on fast, cheap models. Heavy thinking goes to bigger ones. You don't pay flagship rates for clerical tasks.
+- **Dependencies just work.** Tasks that block other tasks run in order. The queue won't fire something whose prereq isn't done.
+- **You stay in control.** Nothing dispatches autonomously. Every run is operator-gated; the board is honest about what's queued and why.
 
 ---
 
-## Concepts at a glance
+## How it works (30 seconds)
 
-- **Tasks DB** - one Notion database; one row per task, including subtasks. Every task has Title, Status, Corpus, Priority, Effort, Exec, Type, and optionally Parent Task + Dependencies.
-- **Corpora** - domain pages (e.g. "Backlinks", "Community", "Infrastructure"). Each corpus has a Goal, local guidance, and a linked view of its tasks.
-- **Status flow** - `Suggestion -> Discussion -> To-Do -> In Progress -> Done` (or `Killed`). The gate from To-Do to execution is explicit: `start` loads the brief and flips status.
-- **Subtasks** - child rows that inherit Corpus and Status from their parent. Subtasks are separable deliverables, not steps. Steps go in the discussion log.
-- **Dependencies** - tasks can block other tasks. `run` resolves the DAG into stages; blocked tasks are reported, not silently skipped.
-- **Exec gate** - only rows marked `Exec=Agent` enter the agent queue. The operator sets this field. `Exec=Human` means "this task needs a person." `Exec=none` is the default - not yet decided.
-- **`run` stages** - `run` (dry-run) shows the plan; `run --go` dispatches. Stages run sequentially; tasks within a stage run in parallel (cap: 5). Each execution agent loads the brief via `start`, executes, and closes with `done`.
+1. **Suggest** an idea. It lands in the Notion inbox.
+2. **Discuss** to clarify scope and break it into subtasks if needed.
+3. **Approve** when you're ready. The task moves to To-Do.
+4. **Run.** Agents pick up `Exec=Agent` rows, work in parallel, and close them with result links.
+
+That's the whole loop. The board is the source of truth; the agent is just an executor.
+
+---
+
+## 1-minute setup
+
+1. Install agency-os in your harness (see the table below).
+2. Duplicate the [public Notion template](https://www.notion.so/35dd01a02a8081dea01cd8d42617f0c8) into your workspace.
+3. Create a Notion integration at https://www.notion.so/my-integrations and share it with the duplicated page.
+4. Drop the token in `.env`: `NOTION_KEY=secret_...`
+5. Run `/agency-os scaffold` (or the natural-language equivalent in your harness).
+
+The board is wired and ready for suggestions.
 
 ---
 
 ## Install
 
-agency-os is a Claude Code plugin. Install it in any Claude Code project:
+agency-os ships as a Claude Code plugin and as a portable skill spec for every other harness. The core contract (`.claude/skills/agency-os/SKILL.md`) is the same everywhere; only the wrapper changes.
 
-```
-/plugin install https://github.com/your-org/agency-os
-```
+| Harness | Format | Setup |
+|---|---|---|
+| **Claude Code** | Plugin | `/plugin install https://github.com/ratamaha-git/agency-os` |
+| **Cursor** | Skill / rules | [docs/harnesses/cursor.md](docs/harnesses/cursor.md) |
+| **Cline / Continue** | Custom instructions | [docs/harnesses/cline.md](docs/harnesses/cline.md) |
+| **Any MCP-capable agent** | Generic spec | [docs/harnesses/generic.md](docs/harnesses/generic.md) |
 
-<!-- TODO: replace URL above with the published plugin URL once the repo is public -->
-
-Once installed, all `/agency-os` commands are available in that project. The plugin reads `.env` for `NOTION_KEY` and writes `notion-pointers.json` to `.claude/skills/agency-os/references/` on first scaffold.
-
-### Requirements
-
-- Claude Code (any recent version)
-- A Notion workspace
-- A Notion internal integration token with access to the workspace (or at minimum the Hub page subtree)
-
----
-
-## Public Notion template
-
-Duplicate the ready-made template to get the Tasks database, Hub page, corpus pages, and linked views pre-wired:
-
-<!-- TODO: add public template URL once published. Check .claude/skills/agency-os/references/public-template-url.md -->
-
-> Template link coming soon. Once the repo is public, run `/agency-os scaffold` against your own workspace - it builds everything from scratch and is equally fast.
+All variants talk to Notion through the same MCP server, so your data and commands stay portable.
 
 ---
 
 ## Docs
 
-- [docs/quickstart.md](docs/quickstart.md) - prereqs, 5-step setup, end-to-end example
-- [docs/concepts.md](docs/concepts.md) - hybrid contract, status flow, structuring work, dependencies
-- [docs/extending.md](docs/extending.md) - adding corpora, custom commands, plugging in other skills
+- [docs/quickstart.md](docs/quickstart.md) - 5-step setup with a worked example
+- [docs/concepts.md](docs/concepts.md) - status flow, dependencies, what lives where
+- [docs/extending.md](docs/extending.md) - custom corpora, new commands, integrations
 
 ---
 
@@ -99,4 +74,6 @@ Duplicate the ready-made template to get the Tasks database, Hub page, corpus pa
 
 MIT - see [LICENSE](LICENSE).
 
-<!-- TODO: link to launch blog post once published -->
+---
+
+Built by [AutomateLab](https://automatelab.tech).

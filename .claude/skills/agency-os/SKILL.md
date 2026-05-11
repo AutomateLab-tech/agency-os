@@ -4,7 +4,18 @@ Notion-as-source-of-truth dispatch board. One Tasks database, one Hub page, one 
 
 **Skill name decision:** the skill is named `agency-os` (matching the repo). All commands are `/agency-os <cmd>`. This is the single plugin entry point; there is no `agency-os/notion` sub-namespace. If you embed this plugin alongside others, prefix commands with `agency-os` to avoid collisions.
 
-## Execution model — delegate to Haiku
+## Harness compatibility
+
+This SKILL.md is the authoritative spec and is harness-agnostic. The slash-command interface (`/agency-os ...`), the status flow, the schema, the workspace layout, and every command's behavior are the same everywhere.
+
+Per-harness wrappers only differ in two things:
+
+- **How commands are triggered.** Claude Code exposes them as real slash commands via the plugin manifest. Cursor / Cline / generic MCP harnesses load this file as instructions and rely on the user typing `/agency-os ...` (or the natural-language equivalent) into chat. Either way, the parser is the same.
+- **Whether mutations are delegated to a subagent.** The "Execution model" section below describes Claude Code's Haiku subagent dispatch. Other harnesses run mutations directly on the main agent. The Notion MCP calls underneath are identical; only the indirection changes.
+
+See `docs/harnesses/` for per-harness setup. If you're reading this in a non-Claude-Code harness, treat the subagent dispatch instructions as optional: execute commands inline instead.
+
+## Execution model — delegate to Haiku (Claude Code only)
 
 Every `/agency-os <command>` invocation runs on **Haiku** via a subagent, not on the orchestrator's model. The work this skill does — resolve an ID, mutate a Notion row via MCP, format a brief — is mechanical and benefits from Haiku's lower latency and cost. The orchestrator stays free for the conversation around the command.
 
