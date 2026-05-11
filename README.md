@@ -8,7 +8,7 @@
 
 ## What it is
 
-agency-os turns Notion into the dashboard of your own AI agency. You drop ideas in. They get clarified, scheduled, and executed by AI agents. Finished work lands back in Notion with links to whatever shipped - posts, submissions, drafts, reports.
+agency-os turns Notion into the dashboard of your own AI agency. You talk through ideas with the agent. It pushes back, clarifies scope, breaks the work into tasks and subtasks with the right hierarchy and dependencies, and writes it all into Notion. You approve. Agents then pick up the work and ship it - posts, submissions, drafts, reports - with result links back on the row.
 
 It's for founders, makers, solo operators, and small teams who already think in Notion and want their AI tools to actually ship things, not just talk about them.
 
@@ -40,8 +40,9 @@ That's the whole loop. The board is the source of truth; the agent is just an ex
 1. Install agency-os in your harness (see the table below).
 2. Duplicate the [public Notion template](https://www.notion.so/35dd01a02a8081dea01cd8d42617f0c8) into your workspace.
 3. Create a Notion integration at https://www.notion.so/my-integrations and share it with the duplicated page.
-4. Drop the token in `.env`: `NOTION_KEY=secret_...`
-5. Run `/agency-os scaffold` (or the natural-language equivalent in your harness).
+4. Drop the token in `.env`: `NOTION_KEY=secret_...` (or configure in your harness's MCP settings).
+5. **If using Cursor, Cline, Continue, or a generic agent:** run `/agency-os init` to configure which models to use for easy/med/hard tasks. (Claude Code handles this automatically.)
+6. Run `/agency-os scaffold` (or the natural-language equivalent in your harness).
 
 The board is wired and ready for suggestions.
 
@@ -58,7 +59,7 @@ agency-os ships as a Claude Code plugin and as a portable skill spec for every o
 | **Cline / Continue** | Custom instructions | [docs/harnesses/cline.md](docs/harnesses/cline.md) |
 | **Any MCP-capable agent** | Generic spec | [docs/harnesses/generic.md](docs/harnesses/generic.md) |
 
-All variants talk to Notion through the same MCP server, so your data and commands stay portable.
+All variants talk to Notion through the same MCP server, so your data and commands stay portable. Model selection (which models run which tasks) is configured via `/agency-os init` on non-Claude harnesses; Claude Code handles it automatically.
 
 ---
 

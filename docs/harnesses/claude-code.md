@@ -26,7 +26,12 @@ The plugin registers `.claude/skills/agency-os/SKILL.md` as a skill and exposes 
 
 - The orchestrator (your current Claude Code model) handles conversation and parses natural language into `/agency-os <command> <args>`.
 - Each Notion mutation dispatches to a Haiku subagent that reads SKILL.md, performs the MCP call, and returns the result verbatim.
+- Batch execution (`/agency-os run`) spawns one agent per task, picking the model (Haiku/Sonnet/Opus) by task complexity.
 - Why: mechanical work runs on a cheaper, faster model; the orchestrator stays focused on the thread.
+
+## Model selection
+
+Claude Code handles model selection automatically — no configuration needed. The `/agency-os init` command and `config.json` are for **non-Claude harnesses only**; Claude Code ignores them.
 
 ## Triggers
 

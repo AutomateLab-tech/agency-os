@@ -15,7 +15,9 @@ Per-harness wrappers only differ in two things:
 
 See `docs/harnesses/` for per-harness setup. If you're reading this in a non-Claude-Code harness, treat the subagent dispatch instructions as optional: execute commands inline instead.
 
-## Execution model — delegate to Haiku (Claude Code only)
+## Execution model — model selection by harness
+
+### Claude Code: delegate to Haiku for mutations, orchestrator picks for batch execution
 
 Every `/agency-os <command>` invocation runs on **Haiku** via a subagent, not on the orchestrator's model. The work this skill does — resolve an ID, mutate a Notion row via MCP, format a brief — is mechanical and benefits from Haiku's lower latency and cost. The orchestrator stays free for the conversation around the command.
 
@@ -36,6 +38,28 @@ After the subagent returns, the orchestrator passes the subagent's output throug
 
 Rule of thumb: anything that touches Notion via the MCP -> Haiku subagent. Anything that's deciding *what* to touch -> orchestrator.
 
+### Non-Claude harnesses: read models from config.json
+
+On Cursor, Cline, Continue, and generic MCP harnesses, the skill can't spawn subagents. Instead:
+
+1. **Before first use:** run `/agency-os init` to store your preferred models in `.claude/skills/agency-os/config.json`.
+2. **Mutations (suggest, discuss, log, etc.):** run inline on the main agent.
+3. **Batch execution (`/agency-os run`):** read `config.json` and use the stored models' constraints when evaluating task complexity.
+
+The config file has this shape:
+```json
+{
+  "harness": "cursor",
+  "models": {
+    "haiku": "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-6",
+    "opus": "claude-opus-4-7"
+  }
+}
+```
+
+The `/agency-os run` command still uses the same picker heuristic (Haiku for mechanical work, Sonnet default, Opus for strategic) — but on non-Claude harnesses, you need to ensure your harness has an API or SDK integration with those models (e.g., via the Anthropic SDK in a Continue custom tool). If your harness only supports one model, set all three to that model and the skill will use it for everything.
+
 ---
 
 ## What lives where (hybrid contract)
@@ -51,6 +75,8 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 ```
 # setup
 /agency-os scaffold                                       # idempotent: build / verify the workspace
+/agency-os init [--harness claude-code|cursor|cline|continue|generic-mcp] [--haiku=<model>] [--sonnet=<model>] [--opus=<model>]
+                                                          # configure model selection (non-Claude harnesses only; Claude Code ignores this)
 /agency-os sync                                           # pull DB snapshot to local cache
 
 # suggestions
@@ -269,6 +295,36 @@ Project-wide rules: link into `docs/`, link into `.claude/skills/`, the launch f
   ]
 }
 ```
+
+---
+
+## Command: `init [--harness=...] [--haiku=...] [--sonnet=...] [--opus=...]`
+
+**Non-Claude harnesses only.** Configure which models to use for task execution. Claude Code harnesses ignore this; they have built-in model selectors.
+
+**Why it matters:** Cursor, Cline, Continue, and generic MCP harnesses can't spawn subagents with different models on the fly. Instead, store your preferred models upfront in `.claude/skills/agency-os/config.json`, then the skill uses them during batch execution.
+
+**Interactive mode** (recommended):
+```
+/agency-os init
+```
+
+Prompts:
+1. Which harness are you using? (or auto-detect from environment)
+2. For *easy* mechanical tasks (form fills, recurring routines), which model? (default: haiku-4-5)
+3. For *medium* substantive work (drafting, audits, revisions), which model? (default: sonnet-4-6)
+4. For *hard* strategic work (design, multi-skill reasoning), which model? (default: opus-4-7)
+
+Stores in `.claude/skills/agency-os/config.json` and prints `config: created -> <path>`.
+
+**Non-interactive mode:**
+```
+/agency-os init --harness cursor --haiku claude-haiku-4-5 --sonnet claude-sonnet-4-6 --opus claude-opus-4-7
+```
+
+If a harness doesn't support a model (e.g., Cursor is configured for only Sonnet), pass the model it does support for all three tiers; the skill will use it for everything.
+
+If `config.json` already exists, re-running `init` overwrites it. To reset: `/agency-os init` interactively.
 
 ---
 
@@ -491,7 +547,11 @@ The script:
 
 ## Command: `run [--go]`
 
-Batch-execute every task in `state/todo-ids.json` (which only contains rows with `Status == "To-Do"` AND `Exec == "Agent"`). The Haiku subagent builds the plan from the sidecar; the **orchestrator** picks a model per task at runtime and spawns the execution agents.
+Batch-execute every task in `state/todo-ids.json` (which only contains rows with `Status == "To-Do"` AND `Exec == "Agent"`).
+
+**Claude Code:** The Haiku subagent builds the plan from the sidecar; the orchestrator picks a model per task at runtime and spawns execution agents.
+
+**Non-Claude harnesses:** The skill reads `config.json` to determine available models. If `config.json` doesn't exist, run `/agency-os init` first.
 
 **Auto-refresh.** `run` always calls `refresh` as its first step. If `refresh` fails, `run` aborts.
 
@@ -513,11 +573,15 @@ Stages run **sequentially**: every task in stage N must finish before stage N+1 
 
 If any task in stage N closes as not Done, stage N+1 tasks that depend on it are dropped; added to the run summary's `blocked-deps`. Stage N+1 tasks whose deps all closed Done still run.
 
-For each task, the orchestrator picks a model and spawns an execution agent. Picker heuristic:
+**Claude Code:** The orchestrator picks a model and spawns an execution agent per task.
 
-- **Haiku** — mechanical, template-driven, single-skill: form filings, recurring routines, log-and-close mutations, anything that's "fill a form / file a PR / post a comment from a known template."
-- **Sonnet** (default) — substantive content/comms work, judgment-bearing audits, multi-step drafting, anything that needs a draft + revision pass.
-- **Opus** — strategic design, multi-skill orchestration, hard reasoning. Rare.
+**Non-Claude harnesses:** The skill reads `config.json` to determine which models are available, then suggests a complexity level (easy/med/hard) for each task based on the same heuristic.
+
+Picker heuristic (same on all harnesses):
+
+- **Haiku (easy)** — mechanical, template-driven, single-skill: form filings, recurring routines, log-and-close mutations, anything that's "fill a form / file a PR / post a comment from a known template."
+- **Sonnet (medium, default)** — substantive content/comms work, judgment-bearing audits, multi-step drafting, anything that needs a draft + revision pass.
+- **Opus (hard)** — strategic design, multi-skill orchestration, hard reasoning. Rare.
 
 Cap concurrency at **5** parallel execution agents **per stage**.
 

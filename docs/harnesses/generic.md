@@ -29,12 +29,14 @@ If your harness can (a) load a long system prompt or instruction file and (b) ca
 
 3. Wire the Notion MCP. The skill calls tools named `notion-fetch`, `notion-create-pages`, `notion-update-page`, `notion-search`, `notion-update-data-source`. The exact tool prefix varies by harness; the spec resolves them dynamically as `mcp__*__notion-*`.
 
-4. First run: ask the agent `/agency-os scaffold`. If your harness has no `.env` mechanism, set `NOTION_KEY` in your shell environment so the MCP server can pick it up.
+4. First run: ask the agent to run `/agency-os init`. This stores your model preferences for task execution.
+
+5. Then scaffold the board with `/agency-os scaffold`. If your harness has no `.env` mechanism, set `NOTION_KEY` in your shell environment so the MCP server can pick it up.
 
 ## What you lose
 
 - **Slash command UI.** Most generic agents don't render `/agency-os ...` as a real command; you type it as plain text. The parser still works.
-- **Subagent delegation.** The Claude Code wrapper offloads mutations to a cheaper model; on a generic harness, everything runs on whatever model is in the chat. The work is mechanical, so even a small model handles it fine.
+- **Dynamic subagent dispatch.** The Claude Code wrapper spawns Haiku subagents on the fly. On a generic harness, mutations run on the main agent. The work is mechanical, so even a small model handles it fine. If you want to use different models for batch `run` execution, configure them via `/agency-os init` and ensure your harness has an API integration (e.g., Anthropic SDK) to actually invoke them.
 
 ## What you keep
 
