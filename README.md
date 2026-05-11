@@ -1,6 +1,6 @@
 # agency-os
 
-> Run your work like a small AI agency, from a single Notion board.
+> Run your work like a AI agency, from a single Notion board.
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 
@@ -8,9 +8,9 @@
 
 ## What it is
 
-agency-os turns Notion into the dashboard of your own AI agency. You talk through ideas with the agent. It pushes back, clarifies scope, breaks the work into tasks and subtasks with the right hierarchy and dependencies, and writes it all into Notion. You approve. Agents then pick up the work and ship it - posts, submissions, drafts, reports - with result links back on the row.
+agency-os turns Notion into the dashboard of your own AI agency. You talk through ideas with the agent. It pushes back, clarifies scope, breaks the work into tasks and subtasks with the right hierarchy and dependencies, and writes it all into Notion. You approve. Agents then pick up the work and ship it - jobs, submissions, drafts, reports - with result links back on the row.
 
-It's for founders, makers, solo operators, and small teams who already think in Notion and want their AI tools to actually ship things, not just talk about them.
+It's for founders, makers, solo operators, and teams who want their AI tools to actually ship things, not just talk about them.
 
 ---
 
