@@ -6,6 +6,12 @@
 
 ---
 
+## Read the launch post
+
+[Learn how agency-os shipped](https://automatelab.tech/p/b3e8d44b-dd98-4e16-a888-9b1be7e9829c/) - and why Haiku subagents cut your token spend 5-10x on mechanical work.
+
+---
+
 ## What it is
 
 agency-os turns Notion into the dashboard of your own AI agency. You talk through ideas with the agent. It pushes back, clarifies scope, breaks the work into tasks and subtasks with the right hierarchy and dependencies, and writes it all into Notion. You approve. Agents then pick up the work and ship it - jobs, submissions, drafts, reports - with result links back on the row.
