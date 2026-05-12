@@ -1,6 +1,6 @@
 # agency-os
 
-> Run your work like a AI agency, from a single Notion board.
+> Run your work like an AI agency, from a single Notion board.
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 
