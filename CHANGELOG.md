@@ -8,6 +8,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-12
+
+### Changed
+- **Single-command mutations now dispatch to Sonnet at medium reasoning effort**, replacing Haiku. ID resolution, dedup checks, and brief assembly need enough judgment that Haiku slipped on edge cases; Sonnet at medium effort is the right balance of accuracy and cost. The Agent tool doesn't expose a reasoning-effort knob, so the directive lives in the subagent prompt.
+- **`run` output formatting.** The plan outline is now emitted as plain markdown (no fenced code block) so task links are clickable. Same fix applied to the final `run summary` block — the previous fenced format rendered `[title](url)` as literal text in Claude Code.
+- **`run --go` prints the plan outline up front**, before any execution agent is spawned, so the operator sees which tasks will fire, in which stages, with which model per task. Followed by `dispatching stage 1...` and dispatch begins. Dry-run (`run` without `--go`) still stops after the outline.
+
 ## [0.1.6] - 2026-05-12
 
 ### Changed

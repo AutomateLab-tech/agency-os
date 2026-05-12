@@ -17,9 +17,9 @@ See `docs/harnesses/` for per-harness setup. If you're reading this in a non-Cla
 
 ## Execution model — model selection by harness
 
-### Claude Code: delegate to Haiku for mutations, orchestrator picks for batch execution
+### Claude Code: delegate to Sonnet (medium reasoning) for mutations, orchestrator picks for batch execution
 
-Every `/agency-os <command>` invocation runs on **Haiku** via a subagent, not on the orchestrator's model. The work this skill does — resolve an ID, mutate a Notion row via MCP, format a brief — is mechanical and benefits from Haiku's lower latency and cost. The orchestrator stays free for the conversation around the command.
+Every `/agency-os <command>` invocation runs on **Sonnet at medium reasoning effort** via a subagent, not on the orchestrator's model. The work this skill does — resolve an ID, mutate a Notion row via MCP, format a brief — needs enough judgment (dedup checks, brief assembly, dependency reasoning) that Haiku slipped on edge cases; Sonnet at medium effort is the right balance of accuracy and cost. The orchestrator stays free for the conversation around the command.
 
 When the user invokes `/agency-os <command> <args>` (or the orchestrator translates a natural-language request into one — see "Natural-language driving" below), the orchestrator's only job is to dispatch:
 
@@ -27,8 +27,8 @@ When the user invokes `/agency-os <command> <args>` (or the orchestrator transla
 Agent({
   description: "Run /agency-os <command>",
   subagent_type: "general-purpose",
-  model: "haiku",
-  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
+  model: "sonnet",
+  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nUse medium reasoning effort — think through ID resolution, dedup checks, and brief assembly carefully, but don't over-deliberate on mechanical mutations.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. Claude Code renders markdown but not HTML, so HTML anchors show up as literal text. If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
 })
 ```
 
@@ -40,9 +40,9 @@ Agent({
 
 Do **not** re-run any step yourself, do not "double-check" the subagent's work.
 
-**Natural-language driving stays on the orchestrator.** Parsing "let's discuss the X task" into `/agency-os discuss <id>`, asking the user clarifying questions during a discussion, deciding when to call `log` vs `add-subtask` — that conversation runs on the orchestrator so thread context survives across turns. Only the discrete mutation (each `log`, each `add-subtask`, each `approve`) dispatches to Haiku.
+**Natural-language driving stays on the orchestrator.** Parsing "let's discuss the X task" into `/agency-os discuss <id>`, asking the user clarifying questions during a discussion, deciding when to call `log` vs `add-subtask` — that conversation runs on the orchestrator so thread context survives across turns. Only the discrete mutation (each `log`, each `add-subtask`, each `approve`) dispatches to the Sonnet subagent.
 
-Rule of thumb: anything that touches Notion via the MCP -> Haiku subagent. Anything that's deciding *what* to touch -> orchestrator.
+Rule of thumb: anything that touches Notion via the MCP -> Sonnet subagent. Anything that's deciding *what* to touch -> orchestrator.
 
 ### Non-Claude harnesses: read models from config.json
 
@@ -544,6 +544,8 @@ Batch-execute every task in `state/todo-ids.json` (which only contains rows with
 
 ### Dispatch phase (orchestrator)
 
+**Before spawning any execution agent**, the orchestrator prints the plan outline (see `### Output` below) so the user sees which tasks are about to fire, in which stages, with which model per task. Then `dispatching stage 1...` and dispatch begins.
+
 Stages run **sequentially**: every task in stage N must finish before stage N+1 starts. Within a stage, tasks fan out in parallel.
 
 If any task in stage N closes as not Done, stage N+1 tasks that depend on it are dropped; added to the run summary's `blocked-deps`. Stage N+1 tasks whose deps all closed Done still run.
@@ -607,23 +609,30 @@ When a **subtask** transitions To-Do -> In Progress (via `start`), the skill als
 
 ### Output
 
-Default — without `--go` — `run` is **dry-run**: prints the plan with tentative model picks, fires nothing.
+**The plan outline is ALWAYS printed first** — both in dry-run (without `--go`) and in real dispatch (with `--go`). The user must see what's about to fire before any agent spawns. In `--go` mode, after printing the outline, immediately proceed to dispatch — do not pause for confirmation (the `--go` flag already is the confirmation).
 
-```
-plan (N tasks, S stages):
-  stage 1 (K tasks, parallel):
-    [haiku]   <title>   ->   <url>
-    [sonnet]  <title>   ->   <url>
-    ...
-  stage 2 (L tasks, parallel, after stage 1):
-    [haiku]   <title>   (deps: <dep-title>)   ->   <url>
-    ...
+Emit the outline as plain markdown (no fenced code block, so the links are clickable):
 
-blocked-deps (B tasks, not dispatched):
-  <title>   (missing: <dep-title-or-id>)   ->   <url>
-```
+**plan (`<N>` tasks, `<S>` stages):**
 
-Pass `--go` to actually dispatch. After completion, the orchestrator emits two sections:
+- **stage 1** (`<K>` tasks, parallel):
+  - `[haiku]` [title](url)
+  - `[sonnet]` [title](url)
+  - ...
+- **stage 2** (`<L>` tasks, parallel, after stage 1):
+  - `[haiku]` [title](url) — deps: [dep-title](dep-url)
+  - ...
+
+If any tasks were dropped for external blockers, follow with:
+
+**blocked-deps (`<B>` tasks, not dispatched):**
+- [title](url) — missing: [dep-title](dep-url) (or raw dep-id if unknown)
+
+If `blocked-deps` is non-empty, also print: `note: <B> task(s) have dependencies outside this batch. Approve the missing deps or run them first, then /agency-os run again.`
+
+In dry-run mode, the outline IS the entire output — stop here, fire nothing.
+
+In `--go` mode, after the outline, print a one-line marker — `dispatching stage 1...` — then begin dispatch. After completion, the orchestrator emits two more sections:
 
 **1. Per-task detail** — one block per task executed, in stage order, verbatim from each execution agent's result report:
 
@@ -641,16 +650,16 @@ next-step:    <...>
 ---
 ```
 
-**2. Run summary** — after all per-task blocks:
+**2. Run summary** — after all per-task blocks. **Do NOT wrap the summary in a fenced code block** (```), because markdown links inside code fences render as literal text in Claude Code. Emit the summary as plain markdown so `[title](url)` links are clickable:
 
-```
-run summary (T queued, S stages):
-  ✅ done:                <N>   — [title](<url>), ...
-  🟡 needs operator:      <M>   — [title](<url>), ...
-  🟡 needs clarification: <P>   — [title](<url>), ...
-  🟡 blocked-deps:        <B>   — [title](<url>) (dep: <dep-title>), ...
-  ❌ failed:              <Q>   — [title](<url>), ...
-```
+**run summary (T queued, S stages):**
+- ✅ done (`<N>`): [title](url), [title](url), ...
+- 🟡 needs operator (`<M>`): [title](url), ...
+- 🟡 needs clarification (`<P>`): [title](url), ...
+- 🟡 blocked-deps (`<B>`): [title](url) (dep: [dep-title](dep-url)), ...
+- ❌ failed (`<Q>`): [title](url), ...
+
+Omit any row whose count is 0.
 
 `blocked-deps` entries also surface which dep blocked them. The orchestrator must emit both sections — the per-task detail AND the summary — every time `--go` is used.
 
