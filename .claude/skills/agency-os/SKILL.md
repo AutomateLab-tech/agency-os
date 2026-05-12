@@ -28,7 +28,7 @@ Agent({
   description: "Run /agency-os <command>",
   subagent_type: "general-purpose",
   model: "haiku",
-  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight, resolve IDs against the cache, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess. Return only what the skill's output spec says; no extra commentary."
+  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess. Return only what the skill's output spec says; no extra commentary."
 })
 ```
 
@@ -77,7 +77,7 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 /agency-os scaffold                                       # idempotent: build / verify the workspace
 /agency-os init [--harness claude-code|cursor|cline|continue|generic-mcp] [--haiku=<model>] [--sonnet=<model>] [--opus=<model>]
                                                           # configure model selection (non-Claude harnesses only; Claude Code ignores this)
-/agency-os sync                                           # pull DB snapshot to local cache
+/agency-os sync                                           # preflight: verify live Notion connection and pointer IDs
 
 # suggestions
 /agency-os suggest "<title>" [--corpus=<s>] [--type one-time|recurring]
@@ -144,9 +144,9 @@ If `start` crashes, the row sits at In Progress. Manual recovery: `/agency-os mo
 
 ## Sync — preflight on every command
 
-Before every command, run `sync`: pull the Tasks DB via `notion-fetch <data_source_id>`, project rows into `references/notion-cache.json`. All resolution of `<id-or-substring>` happens against the cache; mutations target Notion.
+Before every command, call `notion-fetch <tasks_data_source_id>` (from `notion-pointers.json`) to get live data from Notion. Resolve `<id-or-substring>` against the live result. Never read from `notion-cache.json` or any local snapshot. Mutations also target Notion directly.
 
-Sync is idempotent. Empty diff prints `sync: <N> rows`. If sync fails (Notion API down, OAuth expired) print `sync skipped: <reason>` and continue against stale cache; mutating commands refuse if the cache is older than 1 hour.
+If `notion-fetch` fails (Notion API down, OAuth expired), print `sync failed: <reason>` and abort — do not fall back to any cached file.
 
 ---
 
@@ -266,36 +266,6 @@ Project-wide rules: link into `docs/`, link into `.claude/skills/`, the launch f
 }
 ```
 
-`.claude/skills/agency-os/references/notion-cache.json` (gitignored): per-row snapshot from sync. Schema:
-
-```json
-{
-  "synced_at": "<iso>",
-  "tasks": [
-    {
-      "id": "<uuid>",
-      "url": "https://www.notion.so/...",
-      "title": "...",
-      "status": "To-Do",
-      "type": "one-time",
-      "cadence": null,
-      "last_done": null,
-      "corpus": "General",
-      "priority": "2",
-      "owner": "agent",
-      "effort": "M",
-      "parent_task_id": null,
-      "subtask_ids": ["<uuid>"],
-      "dependency_ids": ["<uuid>"],
-      "tags": [],
-      "created": "<iso>",
-      "done_at": null,
-      "result_link": null
-    }
-  ]
-}
-```
-
 ---
 
 ## Command: `init [--harness=...] [--haiku=...] [--sonnet=...] [--opus=...]`
@@ -357,8 +327,7 @@ Add a row in `Suggestion` status.
 3. **Dedup check**: refuse if Title-Jaccard >= 0.8 against any row with status in `{Suggestion, Discussion, To-Do, In Progress}`.
 4. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status=Suggestion, Corpus, Type, Cadence (if recurring), Effort. Page body = `task-page-template.md` rendered.
 5. If `--notes` provided, write into the Description section.
-6. Append cache row.
-7. Print: `+ Suggestion: <title>  ->  <url>`.
+6. Print: `+ Suggestion: <title>  ->  <url>`.
 
 ---
 
@@ -400,7 +369,7 @@ Create a subtask row.
 
 1. Sync preflight.
 2. Resolve `<parent-id>`. Refuse if parent's status is `Done` or `Killed`.
-3. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status = parent's status (`Discussion` or `To-Do` typically), Corpus = parent's corpus, Parent Task = parent, Type = `one-time`, Effort from flag or default, Dependencies from `--deps` if provided (each id resolved against the cache; refuse if any id is unknown).
+3. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status = parent's status (`Discussion` or `To-Do` typically), Corpus = parent's corpus, Parent Task = parent, Type = `one-time`, Effort from flag or default, Dependencies from `--deps` if provided (each id resolved live via Notion; refuse if any id is unknown).
 4. Append a line to the parent's Discussion log section: `### <date> — subtask added: [<title>](<url>)`.
 5. Print: `+ Subtask of <parent-title>: <title>  ->  <url>{  deps=N}`.
 
@@ -557,7 +526,7 @@ Batch-execute every task in `state/todo-ids.json` (which only contains rows with
 
 ### Plan phase (Haiku subagent)
 
-1. Run `refresh`, then read the freshly written `state/todo-ids.json`.
+1. **Execute `scripts/query-tasks.py` via Bash** — this is mandatory and must happen before reading anything. Run `python .claude/skills/agency-os/scripts/query-tasks.py` and verify it exits 0. Only then read the freshly written `state/todo-ids.json`. Never read the sidecar without running the script first; the file on disk is always stale.
 2. **Dedup containers.** For each row with `has_todo_subtasks: true`, skip the parent — its work IS its subtasks.
 3. **Resolve dependencies.** Each sidecar row carries `dependencies: [{id, status}]`. For every dep:
    - `status == "Done"` -> satisfied, ignore.
@@ -728,7 +697,7 @@ Mutate properties without changing status. All flags optional. Print: `Updated: 
 
 `--notes "..."` replaces the Description toggle body. To **append** without replacing, use `log` instead.
 
-`--deps=<id1>,<id2>,...` replaces the Dependencies relation (each id resolved against the cache; refuse if any is unknown). `--deps=none` clears it. Self-reference and cycles are refused.
+`--deps=<id1>,<id2>,...` replaces the Dependencies relation (each id resolved live via Notion; refuse if any is unknown). `--deps=none` clears it. Self-reference and cycles are refused.
 
 ---
 
@@ -791,7 +760,7 @@ Migrating from an existing Notion setup:
 - **Does not auto-execute To-Do items.** `next` shows; only `start` (after explicit invocation) loads the brief and flips status.
 - **Does not write content, deploy, or run any other skill.** It mutates Notion. The brief may **point** an agent at another skill, but this skill never invokes one.
 - **Does not delete content.** `kill` is terminal but archival; the row remains in Notion. To truly remove, archive in Notion manually.
-- **Does not commit or push to git** beyond `notion-pointers.json` (which scaffold writes). The cache is gitignored.
+- **Does not commit or push to git** beyond `notion-pointers.json` (which scaffold writes).
 - **Does not enforce subtask completion before parent done.** It surfaces a nudge, not a refusal.
 - **Does not de-dup beyond Title-Jaccard 0.8 on `suggest`.** Manual rows added via Notion UI bypass the check.
 - **Does not auto-archive old discussion entries.** The Discussion log grows unbounded on the page; the brief assembler bounds the agent's context (latest entry only, older ones referenced).
@@ -808,4 +777,4 @@ Migrating from an existing Notion setup:
                                                                           +--------------------+
 ```
 
-Sync runs as preflight. Notion is canonical. The cache is throwaway. The pointer file is the only repo binding. The DB grid stays clean; details fold; briefs stay bounded.
+Sync runs as preflight. Notion is canonical. The pointer file is the only repo binding. The DB grid stays clean; details fold; briefs stay bounded.
