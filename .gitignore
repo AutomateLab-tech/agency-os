@@ -1,5 +1,6 @@
 node_modules/
 .env
+tmp/
 
 # agency-os runtime state (generated, never committed)
 .claude/skills/agency-os/state/todo-ids.json
