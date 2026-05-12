@@ -562,18 +562,30 @@ Cap concurrency at **5** parallel execution agents **per stage**.
 
 ### Execution-agent contract
 
+**Status discipline is non-negotiable.** Every spawned agent MUST leave the row in a terminal-for-this-run state before returning. No exceptions, no "leave it at In Progress for the operator to see":
+
+| Outcome | Final Status | Closer command |
+|---|---|---|
+| Full completion | `Done` (one-time) / `To-Do` w/ Last Done bumped (recurring) | `/agency-os done <id> --result-link <url> --note "..."` |
+| Partial completion | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "partial: <what's left>"` |
+| Blocked on operator action | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "blocked-operator: <what operator must do>"` |
+| Needs clarification | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "needs-clarification: <question>"` |
+| Failed (crash, tool error, dead-end) | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "failed: <what broke>"` |
+
+Rationale: leaving a row at `In Progress` after the agent has stopped working is a lie about live state. The dashboard ends up cluttered with rows nothing is actually working on, and the next `run` can't tell whether to retry. `Discussion` is the correct holding pen for "an agent looked at this and could not close it" — the operator sees a real queue of things needing attention, and a follow-up `/agency-os approve <id>` is the explicit "try again" signal.
+
 Every spawned agent:
 
-1. Calls `/agency-os start <id>` to load the kickoff brief.
+1. Calls `/agency-os start <id>` to load the kickoff brief AND flip the row To-Do -> In Progress. This MUST be the first call; if the row is already In Progress (re-dispatch), `start` is idempotent and re-emits the brief.
 2. **Runnability check:** can this task plausibly be completed end-to-end by an agent, or does it require operator action (logging into a personal account, solving a captcha, clicking publish in a UI without API access)?
-   - If operator-only: produce the result report with `status: blocked-operator` and stop. Leave the row at `In Progress`.
+   - If operator-only: call `/agency-os log <id> "blocked-operator: <one-line what the operator must do>"`, then `/agency-os move <id> --to discussion`, then emit the result report (step 6) with `status: blocked-operator`. Do not skip the status flip.
 3. Otherwise: execute the brief end-to-end.
 4. **Self-assessment.** Before closing: did I complete 100% of the acceptance criteria? Partial completions are **not** Done.
-5. **Auto-close on full completion.** If yes, call `/agency-os done <id> --result-link <url> --note "<one-line summary>"`. If partial, call `/agency-os move <id> --to discussion --note "<what's left>"`.
-6. **Result report — required, every run, no exceptions.** The agent's final chat output MUST be a single block in this exact format. Returning nothing is not allowed — not on success, not on failure, not on a crash mid-execution. If the agent hit an unrecoverable error before it could do anything meaningful, it still emits the block with `status: failed` and describes what happened.
+5. **Auto-close — required, every outcome.** Pick the closer command from the table above and run it BEFORE emitting the result report. Verify the closer returned success. If the closer itself errors (e.g. Notion API hiccup), retry once; if it still fails, surface that in the result report's `summary` line as `status: failed` with the closer error appended — but still emit the report.
+6. **Result report — required, every run, no exceptions.** The agent's final chat output MUST be a single block in this exact format. Returning nothing is not allowed — not on success, not on failure, not on a crash mid-execution. If the agent hit an unrecoverable error before it could do anything meaningful, it still emits the block with `status: failed` and describes what happened. The `status:` line in the report must agree with the final Notion status: `done` <-> Done, every other status <-> Discussion.
 
    ```
-   ### <task-id> — <a href="<notion-url>"><title></a>
+   ### <task-id> — [<title>](<notion-url>)
    status:       done | blocked-operator | needs-clarification | failed
    model:        haiku | sonnet | opus
    result-link:  <url or ->
@@ -617,7 +629,7 @@ Pass `--go` to actually dispatch. After completion, the orchestrator emits two s
 
 ```
 ---
-### <task-id> — <a href="<notion-url>"><title></a>
+### <task-id> — [<title>](<notion-url>)
 status:       done | blocked-operator | needs-clarification | failed
 model:        haiku | sonnet | opus
 result-link:  <url or ->
@@ -633,11 +645,11 @@ next-step:    <...>
 
 ```
 run summary (T queued, S stages):
-  ✅ done:                <N>   — <a href>title</a>, ...
-  🟡 needs operator:      <M>   — <a href>title</a>, ...
-  🟡 needs clarification: <P>   — <a href>title</a>, ...
-  🟡 blocked-deps:        <B>   — <a href>title</a> (dep: <dep-title>), ...
-  ❌ failed:              <Q>   — <a href>title</a>, ...
+  ✅ done:                <N>   — [title](<url>), ...
+  🟡 needs operator:      <M>   — [title](<url>), ...
+  🟡 needs clarification: <P>   — [title](<url>), ...
+  🟡 blocked-deps:        <B>   — [title](<url>) (dep: <dep-title>), ...
+  ❌ failed:              <Q>   — [title](<url>), ...
 ```
 
 `blocked-deps` entries also surface which dep blocked them. The orchestrator must emit both sections — the per-task detail AND the summary — every time `--go` is used.
