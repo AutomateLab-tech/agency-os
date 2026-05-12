@@ -20,7 +20,7 @@ We are committed to making participation in this project a harassment-free exper
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported to a@1n.ax. All complaints will be reviewed and investigated and will result in a response deemed necessary and appropriate.
+Instances of unacceptable behavior may be reported to hello@automatelab.tech. All complaints will be reviewed and investigated and will result in a response deemed necessary and appropriate.
 
 Maintainers who do not follow or enforce the Code of Conduct may face temporary or permanent repercussions.
 

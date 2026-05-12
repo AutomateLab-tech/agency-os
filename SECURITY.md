@@ -10,7 +10,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Email: a@1n.ax
+Email: hello@automatelab.tech
 
 Include:
 - Description of the vulnerability
