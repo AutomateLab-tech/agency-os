@@ -573,16 +573,19 @@ Every spawned agent:
 6. **Result report — required, every run, no exceptions.** The agent's final chat output MUST be a single block in this exact format. Returning nothing is not allowed — not on success, not on failure, not on a crash mid-execution. If the agent hit an unrecoverable error before it could do anything meaningful, it still emits the block with `status: failed` and describes what happened.
 
    ```
-   ### <task-id> — <title>
+   ### <task-id> — <a href="<notion-url>"><title></a>
    status:       done | blocked-operator | needs-clarification | failed
    model:        haiku | sonnet | opus
    result-link:  <url or ->
    summary:      <1-2 sentences: what was done, or what blocked it>
    next-step:    <only if status != done; what operator should do next>
+
+   #### Full output
+   <verbatim full output of the agent's execution — every step taken, every tool result summary, every decision made. Do not truncate. If the agent produced no meaningful output beyond the header fields above, write "(no output)" here.>
    ```
 
 **Orchestrator accountability.** After each stage, the orchestrator must confirm it received a result block from every agent it spawned. If an agent returned empty output or no output:
-- Treat it as `status: failed`, `summary: agent returned no output`.
+- Treat it as `status: failed`, `summary: agent returned no output`, `full output: (agent returned no output)`.
 - Include it in the run summary under ❌ failed with that note.
 - Never omit a task from the summary because its agent was silent.
 
@@ -608,16 +611,36 @@ blocked-deps (B tasks, not dispatched):
   <title>   (missing: <dep-title-or-id>)   ->   <url>
 ```
 
-Pass `--go` to actually dispatch. After completion:
+Pass `--go` to actually dispatch. After completion, the orchestrator emits two sections:
+
+**1. Per-task detail** — one block per task executed, in stage order, verbatim from each execution agent's result report:
+
+```
+---
+### <task-id> — <a href="<notion-url>"><title></a>
+status:       done | blocked-operator | needs-clarification | failed
+model:        haiku | sonnet | opus
+result-link:  <url or ->
+summary:      <...>
+next-step:    <...>
+
+#### Full output
+<verbatim agent output>
+---
+```
+
+**2. Run summary** — after all per-task blocks:
 
 ```
 run summary (T queued, S stages):
-  done:                <N>
-  needs operator:      <M>
-  needs clarification: <P>
-  blocked-deps:        <B>
-  failed:              <Q>
+  ✅ done:                <N>   — <a href>title</a>, ...
+  🟡 needs operator:      <M>   — <a href>title</a>, ...
+  🟡 needs clarification: <P>   — <a href>title</a>, ...
+  🟡 blocked-deps:        <B>   — <a href>title</a> (dep: <dep-title>), ...
+  ❌ failed:              <Q>   — <a href>title</a>, ...
 ```
+
+`blocked-deps` entries also surface which dep blocked them. The orchestrator must emit both sections — the per-task detail AND the summary — every time `--go` is used.
 
 ---
 
