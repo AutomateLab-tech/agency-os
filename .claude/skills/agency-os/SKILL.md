@@ -28,11 +28,17 @@ Agent({
   description: "Run /agency-os <command>",
   subagent_type: "general-purpose",
   model: "haiku",
-  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess. Return only what the skill's output spec says; no extra commentary."
+  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
 })
 ```
 
-After the subagent returns, the orchestrator passes the subagent's output through to the user verbatim. Do **not** re-run any step yourself, do not "double-check" the subagent's work.
+**The orchestrator MUST always relay the subagent's result to the user — no exceptions.**
+
+- If the subagent produced output: pass it through verbatim.
+- If the subagent returned empty output or no output at all: say so explicitly — `subagent returned no output; execution status unknown. Check Notion directly.`
+- Never absorb the result silently. Never say "I don't have information about what happened." If you don't know, say you don't know and tell the user to check Notion.
+
+Do **not** re-run any step yourself, do not "double-check" the subagent's work.
 
 **Natural-language driving stays on the orchestrator.** Parsing "let's discuss the X task" into `/agency-os discuss <id>`, asking the user clarifying questions during a discussion, deciding when to call `log` vs `add-subtask` — that conversation runs on the orchestrator so thread context survives across turns. Only the discrete mutation (each `log`, each `add-subtask`, each `approve`) dispatches to Haiku.
 
@@ -564,7 +570,7 @@ Every spawned agent:
 3. Otherwise: execute the brief end-to-end.
 4. **Self-assessment.** Before closing: did I complete 100% of the acceptance criteria? Partial completions are **not** Done.
 5. **Auto-close on full completion.** If yes, call `/agency-os done <id> --result-link <url> --note "<one-line summary>"`. If partial, call `/agency-os move <id> --to discussion --note "<what's left>"`.
-6. **Result report — required, every run.** The agent's final chat output:
+6. **Result report — required, every run, no exceptions.** The agent's final chat output MUST be a single block in this exact format. Returning nothing is not allowed — not on success, not on failure, not on a crash mid-execution. If the agent hit an unrecoverable error before it could do anything meaningful, it still emits the block with `status: failed` and describes what happened.
 
    ```
    ### <task-id> — <title>
@@ -574,6 +580,11 @@ Every spawned agent:
    summary:      <1-2 sentences: what was done, or what blocked it>
    next-step:    <only if status != done; what operator should do next>
    ```
+
+**Orchestrator accountability.** After each stage, the orchestrator must confirm it received a result block from every agent it spawned. If an agent returned empty output or no output:
+- Treat it as `status: failed`, `summary: agent returned no output`.
+- Include it in the run summary under ❌ failed with that note.
+- Never omit a task from the summary because its agent was silent.
 
 ### Parent-cascade rule
 
