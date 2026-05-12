@@ -40,7 +40,7 @@ A command entry needs:
 
 Guidelines:
 - Keep commands single-purpose. A command that does two unrelated things is two commands.
-- Every mutating command needs a sync preflight (read the existing cache, reject if stale).
+- Every mutating command needs a sync preflight (call `notion-fetch` live; abort if the call fails — never fall back to a local snapshot).
 - Every command that touches Notion must go through the MCP tools (`notion-update-page`, `notion-create-pages`, etc.) - never write Notion API calls inline in a prompt.
 - Output format matters: the orchestrator and the run summary parser both rely on the exact output lines. Don't change existing output formats without updating callers.
 
@@ -64,8 +64,8 @@ Example addition to `references/general-guidance.md`:
 ```markdown
 ## Available skills
 
-- al-write-blog-post: research, draft, audit, and publish posts. Spec at `.claude/skills/al-write-blog-post/SKILL.md`.
-- al-deploy: stage, commit, and push the repo. Spec at `.claude/skills/al-deploy/SKILL.md`.
+- my-publish-skill: research, draft, audit, and publish content. Spec at `.claude/skills/my-publish-skill/SKILL.md`.
+- my-deploy-skill: stage, commit, and push the repo. Spec at `.claude/skills/my-deploy-skill/SKILL.md`.
 ```
 
 After editing the local file, push it to Notion:

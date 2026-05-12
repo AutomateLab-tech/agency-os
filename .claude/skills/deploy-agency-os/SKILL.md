@@ -23,7 +23,7 @@ Agent({
   description: "Deploy agency-os to GitHub",
   subagent_type: "general-purpose",
   model: "haiku",
-  prompt: "Run the deploy-agency-os skill end-to-end. Read C:\\Work\\agency-os\\.claude\\skills\\deploy-agency-os\\SKILL.md and follow Steps 1 → 3. Execute every git command exactly as written from C:\\Work\\agency-os; verify after each step; if a verification fails, stop and report. Final response: git SHA pushed, commit message used, and anything that needed user attention."
+  prompt: "Run the deploy-agency-os skill end-to-end. Read C:\\Work\\agency-os\\.claude\\skills\\deploy-agency-os\\SKILL.md and follow Steps 1 → 3. Execute every git command exactly as written from C:\\Work\\agency-os; verify after each step; if a verification fails, stop and report. For step 2c: read `git diff --cached --stat` and the first 200 lines of `git diff --cached` to understand what changed, then write a meaningful commit message that describes the actual content changes — never use a generic placeholder like 'deploy: sync local changes'. Final response: git SHA pushed, commit message used, and anything that needed user attention."
 })
 ```
 
@@ -85,16 +85,29 @@ for BR in $(git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads/c
   fi
 done
 
-# 2c — Stage anything dirty in main, commit, push.
+# 2c — Stage anything dirty in main, then derive and commit with a meaningful message.
 git add -A
 if ! git diff --cached --quiet; then
-  git commit -m "deploy: sync local changes"
+  # Read the staged diff summary to write a real commit message.
+  # Rules:
+  #   - Never use "deploy: sync local changes" or any generic placeholder.
+  #   - Never reference internal tooling names (e.g. "al-notion", "local changes", "sync").
+  #   - Format: imperative subject line ≤72 chars, optionally followed by a blank line
+  #     and a short bulleted body listing the notable changes.
+  #   - Base the message solely on what `git diff --cached --stat` and
+  #     `git diff --cached` show — describe the actual content change, not the act of deploying.
+  DIFF_STAT=$(git diff --cached --stat)
+  DIFF_BODY=$(git diff --cached -- '*.md' '*.json' '*.py' | head -200)
+  # The subagent reads DIFF_STAT and DIFF_BODY and writes the commit message inline
+  # before calling `git commit`. See the commit-message guidance above.
+  MSG="<derived from diff — see guidance above>"
+  git commit -m "$MSG"
 fi
 git push
 ```
 
 Notes:
-- Auto-commit messages are generic on purpose. For a meaningful message, commit manually before invoking `/deploy-agency-os`.
+- The commit message **must** be derived from the actual staged diff, not a hardcoded template. Read `git diff --cached --stat` and the first 200 lines of `git diff --cached` for the relevant file types, then write a message that describes the content change.
 - File-lock drain failures are common on Windows when an old session still holds a worktree. The loop continues so deploy isn't blocked, but that worktree's WIP won't merge until the lock is released.
 - If `git push` fails (auth, non-fast-forward, network), **stop and report**.
 
