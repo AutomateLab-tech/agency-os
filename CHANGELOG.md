@@ -8,6 +8,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-13
+
+### Changed
+- **All command outputs use CommonMark markdown links** (`[title](url)`) end-to-end, not just `run` output. `suggest`, `log`, `add-subtask`, `approve`, `done`, `kill`, `next`, `list`, `show`, `update`, `move`, and `add-corpus` all now print task references as `[<title>](<url>)`. The previous `<title>  ->  <url>` form was readable but not clickable in Claude Code.
+- **`discuss` brief ends with `[Open task](<url>)`** instead of a bare URL, for the same reason.
+- **`start` kickoff brief leads with `[<title>](<notion-url>)`** on the `## Task` line; the separate URL line is gone.
+- **README launch link uses the canonical `/agency-os-launch/` path** instead of the `/p/<uuid>/` preview URL.
+
 ## [0.1.7] - 2026-05-12
 
 ### Changed

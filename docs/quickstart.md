@@ -1,6 +1,6 @@
 # Quickstart
 
-Get agency-os running in under 10 minutes. For the full story of how agency-os works and why it matters, [read the launch post](https://automatelab.tech/p/b3e8d44b-dd98-4e16-a888-9b1be7e9829c/).
+Get agency-os running in under 10 minutes. For the full story of how agency-os works and why it matters, [read the launch post](https://automatelab.tech/agency-os-launch/).
 
 ---
 

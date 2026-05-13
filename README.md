@@ -8,7 +8,7 @@
 
 ## Read the launch post
 
-[Learn how agency-os shipped](https://automatelab.tech/p/b3e8d44b-dd98-4e16-a888-9b1be7e9829c/) - and why Haiku subagents cut your token spend 5-10x on mechanical work.
+[Learn how agency-os shipped](https://automatelab.tech/agency-os-launch/) - and why Haiku subagents cut your token spend 5-10x on mechanical work.
 
 ---
 
