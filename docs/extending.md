@@ -115,5 +115,5 @@ agency-os is a Claude Code plugin. To list it on the Claude Code plugin marketpl
 Until the repo is public and the plugin is listed, share it via the full GitHub URL:
 
 ```
-/plugin install https://github.com/your-org/agency-os
+/plugin install https://github.com/ratamaha-git/agency-os
 ```

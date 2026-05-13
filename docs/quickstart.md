@@ -17,7 +17,7 @@ Get agency-os running in under 10 minutes. For the full story of how agency-os w
 **Step 1 - Install the plugin.**
 
 ```
-/plugin install https://github.com/your-org/agency-os
+/plugin install https://github.com/ratamaha-git/agency-os
 ```
 
 Once installed, `/agency-os` commands are available in the current Claude Code project.

@@ -5,7 +5,7 @@ labels: bug
 ---
 
 **Skill or component affected**
-<!-- e.g. al-notion, a specific skill, Notion sync -->
+<!-- e.g. agency-os scaffold, a specific skill, Notion sync -->
 
 **Steps to reproduce**
 1.

@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(Get-ChildItem -Path \"C:\\\\Work\\\\agency-os\" -Recurse -Depth 2)",
-      "Bash(Select-Object FullName)"
-    ]
-  }
-}

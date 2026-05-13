@@ -6,6 +6,9 @@ tmp/
 .claude/skills/agency-os/state/todo-ids.json
 .claude/skills/agency-os/references/notion-cache.json
 
+# Claude Code per-user settings (machine-local, never committed)
+.claude/settings.local.json
+
 # OS / editor
 .DS_Store
 Thumbs.db
