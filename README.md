@@ -45,13 +45,12 @@ That's the whole loop. The board is the source of truth; the agent is just an ex
 ## 1-minute setup
 
 1. Install agency-os in your harness (see the table below).
-2. Duplicate the [public Notion template](https://www.notion.so/35dd01a02a8081dea01cd8d42617f0c8) into your workspace.
-3. Create a Notion integration at https://www.notion.so/my-integrations and share it with the duplicated page.
-4. Drop the token in `.env`: `NOTION_KEY=secret_...` (or configure in your harness's MCP settings).
-5. **If using Cursor, Cline, Continue, or a generic agent:** run `/agency-os init` to configure which models to use for easy/med/hard tasks. (Claude Code handles this automatically.)
-6. Run `/agency-os scaffold` (or the natural-language equivalent in your harness).
+2. Create a Notion integration at https://www.notion.so/my-integrations and share it with your workspace (or a specific parent page).
+3. Drop the token in `.env`: `NOTION_KEY=secret_...` (or configure in your harness's MCP settings).
+4. **If using Cursor, Cline, Continue, or a generic agent:** run `/agency-os init` to configure which models to use for easy/med/hard tasks. (Claude Code handles this automatically.)
+5. Run `/agency-os scaffold` (or `/agency-os scaffold --parent=<page-id>` if the integration is scoped to a specific page).
 
-The board is wired and ready for suggestions.
+That's it. Scaffold builds the Hub, Tasks database, corpus pages, and all linked views in Notion. No template to duplicate.
 
 ---
 

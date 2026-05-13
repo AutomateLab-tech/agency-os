@@ -38,7 +38,13 @@ The token must have access to the workspace or the Hub page. Never commit `.env`
 /agency-os scaffold
 ```
 
-This creates the Hub page, Tasks database, General Guidance page, default corpus pages (General, Recurring), and all linked views inside Notion. It's idempotent - safe to run again if anything was missed.
+This is the single-shot setup. It creates the Hub page, Tasks database (with the full schema), General Guidance page, Resources page, default corpus pages (General, Recurring), and every linked view inside Notion. **No Notion template duplication required** - the command builds everything from scratch. It's idempotent: safe to run again if anything was missed.
+
+If your integration is scoped to a specific page rather than the workspace root, pass that page:
+
+```
+/agency-os scaffold --parent=<page-id-or-url>
+```
 
 After scaffolding, Notion prints the Hub URL. Open it and:
 - Enable "Full width" on the Hub, Guidance, Resources, and corpus pages (the Notion MCP can't do this for you - use the ... menu on each page).

@@ -8,6 +8,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-13
+
+### Changed
+- **Scaffold is now the single-shot setup.** `/agency-os scaffold` already created the Hub, Tasks DB, corpus pages, and views from scratch — but the README and product page still told operators to duplicate a public Notion template first. That step is gone; scaffold IS the setup.
+- **`scaffold` accepts `--parent=<page-id-or-url>`** for integrations scoped to a specific page rather than the workspace root. If the create fails because the integration lacks workspace access, the command now aborts with a clear hint to pass `--parent`.
+
+### Removed
+- **Public Notion template URL reference** (`references/public-template-url.md`) — no longer needed.
+- **"Duplicate the public Notion template" step** from README 1-minute setup and docs/quickstart.md.
+
 ## [0.1.9] - 2026-05-13
 
 ### Changed

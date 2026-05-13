@@ -80,7 +80,8 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 
 ```
 # setup
-/agency-os scaffold                                       # idempotent: build / verify the workspace
+/agency-os scaffold [--parent=<page-id-or-url>] [--corpora="<n1>,<n2>,..."]
+                                                          # idempotent: builds the full Notion workspace from scratch (Hub, Tasks DB, corpus pages, views). No Notion template duplication required.
 /agency-os init [--harness claude-code|cursor|cline|continue|generic-mcp] [--haiku=<model>] [--sonnet=<model>] [--opus=<model>]
                                                           # configure model selection (non-Claude harnesses only; Claude Code ignores this)
 /agency-os sync                                           # preflight: verify live Notion connection and pointer IDs
@@ -304,11 +305,13 @@ If `config.json` already exists, re-running `init` overwrites it. To reset: `/ag
 
 ---
 
-## Command: `scaffold`
+## Command: `scaffold [--parent=<id-or-url>] [--corpora="<n1>,<n2>,..."]`
 
-Idempotent setup. If `notion-pointers.json` exists and every ID resolves via `notion-fetch`, prints `scaffold: already in place` and exits. Otherwise creates only what's missing.
+**The single-shot setup command.** Builds the entire Notion workspace from scratch — Hub page, Tasks database with the full schema below, General Guidance page, Resources page, default corpus pages (`General`, `Recurring`), and every linked DB view. There is no public Notion template to duplicate; this command IS the setup. The integration only needs to be shared with the parent (workspace root or `--parent` page) before running.
 
-1. **Locate or create the Hub**. Search by title; create at workspace root if absent.
+Idempotent: if `notion-pointers.json` exists and every ID resolves via `notion-fetch`, prints `scaffold: already in place` and exits. Otherwise creates only what's missing.
+
+1. **Locate or create the Hub**. If `--parent=<page-id-or-url>` is passed, create the Hub as a child of that page (use this when the integration is shared with a specific page rather than the workspace root). Otherwise: search by title at workspace root; create there if absent. If the create fails because the integration lacks workspace-root access, abort with `scaffold: integration must be shared with the workspace root, or pass --parent=<page-id>`.
 2. **Create the Tasks database** as a child of the Hub, with the schema above. Capture both `database_id` and `data_source_id`. The `Dependencies` property is a self-relation on Tasks (separate from `Parent Task` — that's the hierarchy relation; `Dependencies` is the gating relation used only by `run`).
 3. **Create the General Guidance page** under the Hub; seed body from `references/general-guidance.md`.
 4. **Create each Corpus page** under the Hub. Default set: `General`, `Recurring` (user can customise via `--corpora` flag or add later with `add-corpus`). Seed each from `references/corpus-template.md`.
@@ -787,10 +790,16 @@ When the user says these things in chat, the skill translates to commands:
 
 ## Bootstrapping
 
-Fresh workspace:
+Fresh workspace — no template duplication required, the command creates everything:
 
 ```
 /agency-os scaffold
+```
+
+If your Notion integration is shared with a specific page rather than the workspace root, pass that page:
+
+```
+/agency-os scaffold --parent=<page-id-or-url>
 ```
 
 You can pass `--corpora "Name1,Name2,Name3"` to scaffold with custom corpus names instead of the defaults (`General`, `Recurring`). You can always add more later with `/agency-os add-corpus "<name>"`.
