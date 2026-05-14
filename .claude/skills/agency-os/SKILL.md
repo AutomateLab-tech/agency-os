@@ -1,3 +1,8 @@
+---
+name: agency-os
+description: "Notion-as-source-of-truth dispatch board for running your work like an AI agency. One Tasks database is the source of truth; tasks flow Suggestion → Discussion → To-Do → In Progress → Done with subtasks, recurring cadences, dependencies, and template subtrees. Batch execution fans approved To-Do rows out to parallel agents with per-task model selection. Trigger when the user mentions: Notion tasks, agency board, /agency-os commands, capturing chat to Notion, running the To-Do queue, suggesting/approving/discussing tasks."
+---
+
 # agency-os
 
 Notion-as-source-of-truth dispatch board. One Tasks database, one Hub page, one page per Corpus, one page each for General Guidance and Resources. The skill mutates Notion via the Notion MCP (`mcp__*__notion-*` tools); only `references/notion-pointers.json` is committed to git.
