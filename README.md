@@ -1,14 +1,8 @@
 # agency-os
 
-> Run your work like an AI agency, from a single Notion board.
+> A visual workflow board for working with AI. Structure ideas into tasks, stay in control of what ships.
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
-
----
-
-## Read the launch post
-
-[Learn how agency-os shipped](https://automatelab.tech/agency-os-launch/) - and why Haiku subagents cut your token spend 5-10x on mechanical work.
 
 ---
 
@@ -18,16 +12,19 @@ agency-os turns Notion into the dashboard of your own AI agency. You talk throug
 
 It's for founders, makers, solo operators, and teams who want their AI tools to actually ship things, not just talk about them.
 
+[Read the launch post with examples and illustrations](https://automatelab.tech/agency-os-launch/)
+
 ---
 
 ## What you get
 
-- **The agent plans for you.** Talk through an idea in plain English. The agent asks the right questions, carves it into tasks and subtasks, sets dependencies, and writes the plan onto the board. You stop being the project manager.
-- **One place for everything.** Ideas, tasks, decisions, and finished work all live in one board. No more chasing TODOs across Slack, docs, and twelve open tabs.
-- **Agents do the boring parts.** Flip a task to `Exec=Agent` and an AI handles it end-to-end: form fills, post drafts, directory submissions, log-and-close work.
-- **Right model for the job.** Mechanical work runs on fast, cheap models. Heavy thinking goes to bigger ones. You don't pay flagship rates for clerical tasks.
+- **Structure over noise.** AI ideas land as Suggestions, not commands. Discuss, scope, and approve before anything runs. The board is the source of truth; work has shape and status.
+- **One visual board for everything.** Ideas, tasks, decisions, finished work - all in a single Notion view with a clear status flow. No chasing TODOs across Slack, docs, and twelve open tabs.
+- **You stay in control of execution.** Nothing dispatches autonomously. Every run is operator-gated. Agents only touch rows you've explicitly marked `Exec=Agent`; the board is honest about what's queued, what's blocked, and why.
+- **The agent plans with you, not at you.** Talk through an idea in plain English. The agent asks clarifying questions, carves it into tasks and subtasks, sets dependencies. You stop being the project manager.
+- **Agents do the mechanical parts.** Once a task is approved with `Exec=Agent`, an AI handles it end-to-end: form fills, draft posts, directory submissions, log-and-close work. Result links come back on the row.
 - **Dependencies just work.** Tasks that block other tasks run in order. The queue won't fire something whose prereq isn't done.
-- **You stay in control.** Nothing dispatches autonomously. Every run is operator-gated; the board is honest about what's queued and why.
+- **Right model for the job** *(side benefit, not the point).* Mechanical work runs on fast, cheap models; heavy thinking goes to bigger ones. You don't pay flagship rates for clerical tasks.
 
 ---
 
