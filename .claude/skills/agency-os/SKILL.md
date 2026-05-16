@@ -114,7 +114,7 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 # suggestions
 /agency-os suggest "<title>" [--corpus=<s>] [--type one-time|recurring]
                               [--cadence daily|weekly|biweekly|monthly|quarterly|yearly]
-                              [--notes "..."] [--effort S|M|L|XL]
+                              [--notes "..."] [--effort S|M|L|XL] [--parent=<id>]
 
 # clarification & subtasks
 /agency-os discuss <id>                                   # Suggestion -> Discussion + load context for clarification
@@ -139,7 +139,7 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 /agency-os update <id> [--title="..."] [--notes="..."] [--priority=1|2|3|4]
                        [--effort=S|M|L|XL]
                        [--type=one-time|recurring] [--cadence=...] [--corpus=<s>]
-                       [--deps=<id1>,<id2>,...|none]
+                       [--deps=<id1>,<id2>,...|none] [--parent=<id>|none]
 /agency-os move <id> --to <status>                        # force any status transition
 /agency-os add-corpus "<name>" [--goal "..."]
 ```
@@ -354,14 +354,16 @@ Idempotent: if `notion-pointers.json` exists and every ID resolves via `notion-f
 
 ## Command: `suggest "<title>" ...`
 
-Add a row in `Suggestion` status.
+Add a row in `Suggestion` status. Before calling `suggest`, the orchestrator MUST have applied the parent discipline check (see "Structuring work" -> "Parent discipline" below) — `suggest` itself does not enforce structure.
 
 1. Sync preflight.
-2. Validate: `--corpus` is in pointers (else list and refuse); if `--type=recurring`, `--cadence` is required.
+2. Validate: `--corpus` is in pointers (else list and refuse); if `--type=recurring`, `--cadence` is required. If `--parent=<id>` is provided, resolve it live and refuse if unknown, Done, or Killed; refuse self-reference and cycles.
 3. **Dedup check**: refuse if Title-Jaccard >= 0.8 against any row with status in `{Suggestion, Discussion, To-Do, In Progress}`.
-4. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status=Suggestion, Corpus, Type, Cadence (if recurring), Effort. Page body = `task-page-template.md` rendered.
+4. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status=Suggestion, Corpus, Type, Cadence (if recurring), Effort. If `--parent=<id>` provided, also set Parent Task to that id and inherit Corpus from the parent unless `--corpus` was explicitly passed. Page body = `task-page-template.md` rendered.
 5. If `--notes` provided, write into the Description section.
-6. Print: `+ Suggestion: [<title>](<url>)`.
+6. Print: `+ Suggestion: [<title>](<url>){  parent=<parent-title>}`.
+
+`--parent` makes `suggest` the canonical way to create a row under any existing task. `add-subtask` remains a convenience for the in-discussion flow (it inherits parent's status; `suggest --parent` always lands in Suggestion).
 
 ---
 
@@ -429,6 +431,28 @@ Rule of thumb: if you'd naturally hand it to a different agent on a different da
 - Subtask (depth 1): the normal case. Most subtasks live here.
 - Nested subtask (depth 2): legitimate when a parent has multiple major deliverables, each with its own breakdown.
 - Depth 3+: the skill warns. Almost always means the hierarchy should be flattened or split into separate top-level tasks.
+
+### Parent discipline — never dump in root
+
+A flat list of unrelated top-level tasks is a smell. **Before creating ANY new row, the orchestrator MUST run two checks.** This is non-negotiable for batch creation and required even for single rows when the work is clearly part of a broader initiative.
+
+**Check 1: Does this belong under an existing parent?** Scan active In Progress / To-Do top-level rows (use `list inprogress`, `list todo`, or recall from session context). If the new work is a sub-deliverable, follow-up, related artifact, or supporting piece of one of those initiatives, parent it there with `--parent=<id>`. Don't create siblings of an umbrella you can attach to.
+
+**Check 2: Is this a batch of 3+ related rows?** If yes, create a container subtask first, then add each work item as a child of that container. A container is itself a task — title like "Landing page content series", "Onboarding flow rewrite", "API v2 migration" — with a coherent "all subtasks shipped" done state. It is NOT a folder. The container itself goes under the umbrella parent from Check 1 when one exists.
+
+**Decision matrix:**
+
+| Situation | Action |
+|---|---|
+| 1 task, unrelated to anything active | top-level `suggest` is fine |
+| 1 task, clearly part of an active initiative | `suggest --parent=<active-initiative-id>` |
+| 2 tasks sharing a clear theme | up to judgment — often a container helps even at N=2 |
+| 3+ related tasks at once | container subtask first, then `--parent=<container-id>` for each work item |
+| 3+ flat top-level rows that share a theme | this is the failure mode — don't do it |
+
+**Ownership: the orchestrator, not the subagent, makes the structure call.** Before any `suggest` batch dispatches, the orchestrator must (a) check for an existing umbrella parent, (b) decide whether a container is needed, (c) write down the planned tree in chat so the user can correct it before mutations fly. The subagent then executes the orchestrator's plan verbatim — it does not second-guess the parent assignment, and it does not invent containers mid-batch.
+
+**Reparenting existing rows.** When the user asks to "reorganize", "restructure", "group under <parent>", or "move <task> under <other-task>" — that's `update --parent=<id>` (one row at a time) or, for bulk reorganization, the orchestrator plans the new tree, creates any new container rows via `suggest --parent`, then reparents the existing rows via `update --parent`.
 
 ### The "move this chat to Notion" workflow
 
@@ -781,6 +805,8 @@ Mutate properties without changing status. All flags optional. Print: `✓ Updat
 
 `--deps=<id1>,<id2>,...` replaces the Dependencies relation (each id resolved live via Notion; refuse if any is unknown). `--deps=none` clears it. Self-reference and cycles are refused.
 
+`--parent=<id>` reparents the task under `<id>` (resolved live; refuse if unknown, Done, or Killed; refuse self-reference and cycles). `--parent=none` removes the parent and promotes the row to top-level. Use cases: regrouping flat tasks under a newly created container, demoting a misplaced subtask back to root, swapping a task between umbrella initiatives.
+
 ---
 
 ## Command: `move <id> --to <status>`
@@ -795,7 +821,9 @@ When the user says these things in chat, the skill translates to commands:
 
 | User says | Skill calls |
 |---|---|
-| "add a suggestion: <title>" / "new idea: <title>" | `suggest "<title>"` (asks for corpus if ambiguous) |
+| "add a suggestion: <title>" / "new idea: <title>" | `suggest "<title>"` (asks for corpus if ambiguous; runs the parent-discipline check first — see "Structuring work") |
+| "create N tasks for X, Y, Z" / "batch add: ..." / "set up tasks for <multi-part work>" | orchestrator FIRST runs the parent-discipline check (existing umbrella? container needed?), proposes the tree in chat, THEN dispatches `suggest --parent=<id>` per item |
+| "reorganize <X>" / "restructure under <parent>" / "move <task> under <other-task>" / "group these tasks" | `update <id> --parent=<parent-id>` per row (or `--parent=none` to demote) |
 | "let's discuss X" / "open X for discussion" | `discuss <id>` |
 | "log: <thing>" / "note that <thing>" (during discuss) | `log <id> "<thing>"` |
 | "add a subtask: <title>" / "we'll also need to <thing>" | `add-subtask <parent-id> "<title>"` |
