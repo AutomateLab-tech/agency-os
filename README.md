@@ -22,6 +22,7 @@ It's for founders, makers, solo operators, and teams who want their AI tools to 
 - **One visual board for everything.** Ideas, tasks, decisions, finished work - all in a single Notion view with a clear status flow. No chasing TODOs across Slack, docs, and twelve open tabs.
 - **You stay in control of execution.** Nothing dispatches autonomously. Every run is operator-gated. Agents only touch rows you've explicitly marked `Exec=Agent`; the board is honest about what's queued, what's blocked, and why.
 - **The agent plans with you, not at you.** Talk through an idea in plain English. The agent asks clarifying questions, carves it into tasks and subtasks, sets dependencies. You stop being the project manager.
+- **The board stays organised.** Before adding any task, the skill checks whether it belongs under an active initiative and surfaces the match. `/agency-os tree` shows the full hierarchy at a glance. Accidental flat lists of unrelated top-level rows are caught before they land.
 - **Agents do the mechanical parts.** Once a task is approved with `Exec=Agent`, an AI handles it end-to-end: form fills, draft posts, directory submissions, log-and-close work. Result links come back on the row.
 - **Dependencies just work.** Tasks that block other tasks run in order. The queue won't fire something whose prereq isn't done.
 - **Right model for the job** *(side benefit, not the point).* Mechanical work runs on fast, cheap models; heavy thinking goes to bigger ones. You don't pay flagship rates for clerical tasks.
@@ -30,10 +31,12 @@ It's for founders, makers, solo operators, and teams who want their AI tools to 
 
 ## How it works (30 seconds)
 
-1. **Suggest** an idea. It lands in the Notion inbox.
+1. **Suggest** an idea. The skill checks whether it belongs under an existing initiative before creating anything — no accidental root-level clutter.
 2. **Discuss** with the agent. It asks clarifying questions, then writes out subtasks and dependencies on the row.
 3. **Approve** when you're ready. The task and its subtasks move to To-Do.
 4. **Run.** Agents pick up `Exec=Agent` rows, work in parallel (respecting dependencies), and close them with result links.
+
+Use `/agency-os tree` any time to see the full hierarchy at a glance.
 
 That's the whole loop. The board is the source of truth; the agent is just an executor.
 
