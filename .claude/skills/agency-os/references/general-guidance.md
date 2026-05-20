@@ -64,7 +64,19 @@ The project runs on a **hybrid** local-vs-Notion split. When you need something,
 
 - **Local files** (`.claude/skills/`, `docs/`, `.env`, etc.) are source-of-truth for stable spec: skill instructions, project docs, style guides. Free to read, git-tracked. Grep these.
 - **Notion** is source-of-truth for mutable task state: the rows in the Tasks DB, their statuses, their discussion logs, their done logs, the corpus pages. Read these via the Notion MCP.
+- **`.claude/skills/agency-os/state/task-tree.json`** is a local snapshot of the active task hierarchy, rebuilt on every `sync` / `tree` / `suggest`. Read this first whenever you need to understand the board's structure — it is free (no MCP call) and fast. If it's absent, run `/agency-os tree` once to generate it. This file is gitignored (mutable state).
 - This General Guidance page itself is a **one-way mirror** of `.claude/skills/agency-os/references/general-guidance.md`. The local file is canonical; the Notion copy exists so the operator sees the rules where the work lives. To change the rules, edit the local file and push the mirror.
+
+## Task structure — orient before adding
+
+Before creating any task (especially a batch), orient yourself:
+
+1. **Read `state/task-tree.json`** — instant hierarchy overview, no MCP needed.
+2. If the file is absent: **run `/agency-os tree`** — this generates it and prints the hierarchy.
+3. Check for an existing umbrella before creating anything at the top level. A task that belongs under an active initiative MUST be parented there, not added to the root.
+4. For 3+ related tasks: create a container row first, then add work items as its children.
+
+Never create a flat list of top-level rows for related work. This is the most common structural mistake and the hardest to clean up later.
 
 ## Launch flow
 

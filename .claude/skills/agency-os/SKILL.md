@@ -53,7 +53,7 @@ Agent({
   description: "Run /agency-os <command>",
   subagent_type: "general-purpose",
   model: "sonnet",
-  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nUse medium reasoning effort — think through ID resolution, dedup checks, and brief assembly carefully, but don't over-deliberate on mechanical mutations.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. Claude Code renders markdown but not HTML, so HTML anchors show up as literal text. If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
+  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nUse medium reasoning effort — think through ID resolution, dedup checks, and brief assembly carefully, but don't over-deliberate on mechanical mutations.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. Claude Code renders markdown but not HTML, so HTML anchors show up as literal text. If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nSTRUCTURE CHECK (for `suggest` without `--parent`, and for any batch suggest): Before creating any row, read `.claude/skills/agency-os/state/task-tree.json` for the current active task hierarchy (written by the most recent `sync` or `tree` run). If the file is absent, call `/agency-os tree` first. Scan In-Progress and To-Do rows for an obvious umbrella parent. If a candidate exists with high confidence, surface it and require the orchestrator to confirm before proceeding. Never silently create a top-level row when an obvious parent exists. Full rules: SKILL.md under `Structuring work → Parent discipline`.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
 })
 ```
 
@@ -93,6 +93,24 @@ The `/agency-os run` command still uses the same picker heuristic (Haiku for mec
 
 ---
 
+## Authorization gates — no auto-promotion, no auto-execution
+
+Two transitions in this skill have outsized blast radius and require **explicit user authorization** every time. The skill must never make either move on its own initiative, even when "obvious from context." If in doubt about scope or intent, **ask before mutating** — a clarifying chat turn is cheap; a wrong-direction bulk promotion is a full revert pass plus operator trust.
+
+**Gate 1 — Promoting to To-Do.** Any transition into `To-Do` (via `approve`, `move --to todo`, or any direct `notion-update-page` write to the Status property) is a scheduling commitment by the operator. The orchestrator (and any spawned subagent) MUST NOT promote a row to To-Do unless the user has named that row, or named an explicit batch the row clearly belongs to. "Approve every Discussion descendant of <task>" is in scope when the user said exactly that. "The user wants everything under <task> executed, so let me cascade-approve the discussion descendants first" is **not** — that's auto-promotion, the failure mode this gate exists to prevent.
+
+The recurring-loop auto-flip on `done` (Type=recurring rows reset to To-Do with Last Done bumped) is the only exception — the operator authorized the loop when they marked Type=recurring originally.
+
+**Gate 2 — Marking Exec=Agent.** Setting `Exec=Agent` makes a row dispatchable by `run --go` without further confirmation. This property is operator-owned: in normal flow the operator flips Exec=Agent in Notion's UI on rows they want agents to handle. The skill MUST NOT set `Exec=Agent` on any row — not via `update`, not via direct `notion-update-page`, not as a side effect of any other command — unless the user has explicitly named that row (or that explicit set) and asked for it. Bulk-flipping Exec=Agent across a subtree because "these all look agent-runnable" is forbidden. `Exec=Human` and `Exec=none` are safe defaults; only `Exec=Agent` requires the gate.
+
+**Gate 3 — Firing the queue.** `/agency-os run` is dry-run by default; `--go` is the user's explicit dispatch authorization. The orchestrator never adds `--go` to a `run` call the user did not type. Natural-language "execute the queue" / "run todo" maps to `run` (dry-run); the user reviews the plan, then says "go" / "fire it" / "yes" -> only then `run --go`.
+
+**Worked failure mode to avoid.** User says "execute all todo tasks under <task>". This means: dispatch rows that are *already* `Status=To-Do AND Exec=Agent` under that task. It does NOT authorize flipping Discussion descendants to To-Do, flipping leaves to Exec=Agent, or any other preparation step. If the user wanted that, they would have said "approve all subtasks of <task>, mark them Exec=Agent, then run them." Take the instruction literally; if the literal scope yields zero runnable rows, say so and ask — do not invent a prep batch.
+
+**When in doubt — ask.** If a user instruction could plausibly mean "promote to To-Do" or "mark Exec=Agent" or "fire the queue" but doesn't name the specific row(s) or the specific gate, the orchestrator MUST ask before mutating. List candidates, wait for selection, then act. Never guess the set.
+
+---
+
 ## What lives where (hybrid contract)
 
 This skill is the one place where the project's local-vs-Notion split is enforced. Get this wrong and you either spam MCP tokens reading what should be a file, or you put mutable state somewhere git can't roll it back.
@@ -110,6 +128,7 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 /agency-os init [--harness claude-code|cursor|cline|continue|generic-mcp] [--haiku=<model>] [--sonnet=<model>] [--opus=<model>]
                                                           # configure model selection (non-Claude harnesses only; Claude Code ignores this)
 /agency-os sync                                           # preflight: verify live Notion connection and pointer IDs
+/agency-os tree [--depth N] [--corpus=<s>] [--status=<s>] # compact hierarchy snapshot; also writes state/task-tree.json
 
 # suggestions
 /agency-os suggest "<title>" [--corpus=<s>] [--type one-time|recurring]
@@ -178,7 +197,28 @@ If `start` crashes, the row sits at In Progress. Manual recovery: `/agency-os mo
 
 Before every command, call `notion-fetch <tasks_data_source_id>` (from `notion-pointers.json`) to get live data from Notion. Resolve `<id-or-substring>` against the live result. Never read from `notion-cache.json` or any local snapshot. Mutations also target Notion directly.
 
-If `notion-fetch` fails (Notion API down, OAuth expired), print `sync failed: <reason>` and abort — do not fall back to any cached file.
+**Tree snapshot side-effect.** After a successful `notion-fetch`, write `state/task-tree.json` — a compact nested representation of all non-terminal tasks (Suggestion / Discussion / To-Do / In Progress), structured as a tree via `Parent Task`. This file is the free structure reference for agents: any subsequent `suggest` call, orchestrator planning step, or session warm-up can read it off-disk without a fresh MCP round-trip. The file is gitignored (mutable state); it is always rebuilt from live data, never from a prior snapshot.
+
+```json
+{
+  "snapshot_at": "<iso>",
+  "tree": [
+    {
+      "id": "OS-12", "notion_id": "<uuid>", "url": "<url>",
+      "title": "Top-level initiative", "status": "In Progress",
+      "corpus": "General", "effort": "L", "depth": 0,
+      "children": [
+        { "id": "OS-13", "notion_id": "...", "url": "...",
+          "title": "Container subtask", "status": "To-Do",
+          "corpus": "General", "effort": "M", "depth": 1,
+          "children": [] }
+      ]
+    }
+  ]
+}
+```
+
+If `notion-fetch` fails (Notion API down, OAuth expired), print `sync failed: <reason>` and abort — do not fall back to any cached file. Do not write or update `task-tree.json` on a failed sync.
 
 ---
 
@@ -354,16 +394,23 @@ Idempotent: if `notion-pointers.json` exists and every ID resolves via `notion-f
 
 ## Command: `suggest "<title>" ...`
 
-Add a row in `Suggestion` status. Before calling `suggest`, the orchestrator MUST have applied the parent discipline check (see "Structuring work" -> "Parent discipline" below) — `suggest` itself does not enforce structure.
+Add a row in `Suggestion` status. **Structure check runs inside `suggest`** — the subagent enforces it, not just the orchestrator. The orchestrator decides the shape (which parent, whether a container is needed); `suggest` verifies that decision was made rather than silently creating a root-level row.
 
-1. Sync preflight.
-2. Validate: `--corpus` is in pointers (else list and refuse); if `--type=recurring`, `--cadence` is required. If `--parent=<id>` is provided, resolve it live and refuse if unknown, Done, or Killed; refuse self-reference and cycles.
-3. **Dedup check**: refuse if Title-Jaccard >= 0.8 against any row with status in `{Suggestion, Discussion, To-Do, In Progress}`.
-4. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status=Suggestion, Corpus, Type, Cadence (if recurring), Effort. If `--parent=<id>` provided, also set Parent Task to that id and inherit Corpus from the parent unless `--corpus` was explicitly passed. Page body = `task-page-template.md` rendered.
-5. If `--notes` provided, write into the Description section.
-6. Print: `+ Suggestion: [<title>](<url>){  parent=<parent-title>}`.
+1. **Structure preflight (skip only when `--parent` is provided or `--force-top-level` is passed).**
+   - Read `state/task-tree.json` for the active task tree. If the file is absent, it will be built as a side-effect of the sync preflight in step 2 — proceed.
+   - Scan In-Progress and To-Do **top-level** rows for an obvious umbrella. "Obvious" = the candidate's title or corpus clearly covers the work being suggested (confidence >= 80%).
+   - If one candidate: `Candidate parent: [<title>](<url>) — attach as subtask? Reply with --parent=<id> to confirm, or --force-top-level to create at root.` **Stop and wait** for the orchestrator to relay the answer. Do not create the row until confirmed.
+   - If multiple candidates: list all, wait.
+   - If no candidate: proceed silently.
+2. Sync preflight.
+3. Validate: `--corpus` is in pointers (else list and refuse); if `--type=recurring`, `--cadence` is required. If `--parent=<id>` is provided, resolve it live and refuse if unknown, Done, or Killed; refuse self-reference and cycles.
+4. **Dedup check**: refuse if Title-Jaccard >= 0.8 against any row with status in `{Suggestion, Discussion, To-Do, In Progress}`.
+5. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status=Suggestion, Corpus, Type, Cadence (if recurring), Effort. If `--parent=<id>` provided, also set Parent Task to that id and inherit Corpus from the parent unless `--corpus` was explicitly passed. Page body = `task-page-template.md` rendered.
+6. If `--notes` provided, write into the Description section.
+7. **Update tree snapshot**: append the new row to `state/task-tree.json` so the snapshot stays current without a full re-fetch.
+8. Print: `+ Suggestion: [<title>](<url>){  parent=<parent-title>}`.
 
-`--parent` makes `suggest` the canonical way to create a row under any existing task. `add-subtask` remains a convenience for the in-discussion flow (it inherits parent's status; `suggest --parent` always lands in Suggestion).
+`--parent` makes `suggest` the canonical way to create a row under any existing task. `add-subtask` remains a convenience for the in-discussion flow (it inherits parent's status; `suggest --parent` always lands in Suggestion). `--force-top-level` is the explicit override when a root-level task is genuinely unrelated to any active initiative — it skips the structure preflight without a prompt.
 
 ---
 
@@ -434,25 +481,51 @@ Rule of thumb: if you'd naturally hand it to a different agent on a different da
 
 ### Parent discipline — never dump in root
 
-A flat list of unrelated top-level tasks is a smell. **Before creating ANY new row, the orchestrator MUST run two checks.** This is non-negotiable for batch creation and required even for single rows when the work is clearly part of a broader initiative.
+A flat list of unrelated top-level tasks is a smell. **Before creating ANY new row, the orchestrator MUST run the structure preflight.** This is non-negotiable for batch creation and required even for single rows when the work is clearly part of a broader initiative.
 
-**Check 1: Does this belong under an existing parent?** Scan active In Progress / To-Do top-level rows (use `list inprogress`, `list todo`, or recall from session context). If the new work is a sub-deliverable, follow-up, related artifact, or supporting piece of one of those initiatives, parent it there with `--parent=<id>`. Don't create siblings of an umbrella you can attach to.
+#### Structure preflight protocol
 
-**Check 2: Is this a batch of 3+ related rows?** If yes, create a container subtask first, then add each work item as a child of that container. A container is itself a task — title like "Landing page content series", "Onboarding flow rewrite", "API v2 migration" — with a coherent "all subtasks shipped" done state. It is NOT a folder. The container itself goes under the umbrella parent from Check 1 when one exists.
+The fastest path: read `state/task-tree.json` (written by every `sync`, `tree`, or `suggest`). This file gives a full tree snapshot with no MCP round-trip. If it's absent, run `/agency-os tree` once to generate it — this is cheap and should be a first step whenever starting a new session or about to do batch work.
+
+```
+step 1 — read state/task-tree.json (or run /agency-os tree if absent)
+step 2 — scan top-level In Progress + To-Do rows for an umbrella match
+step 3 — if found: propose --parent=<id> in chat and wait for user confirmation
+          if batch (3+ rows): also propose the container row before any work items
+          if none found: proceed with top-level suggest
+```
+
+The orchestrator MUST **show the planned tree in chat** before any mutation flies. One-liner format:
+
+```
+Planned tree:
+  OS-12 "Umbrella initiative" [existing]
+    → NEW "Container: <theme>" [new container]
+      → NEW "<work item 1>"
+      → NEW "<work item 2>"
+      → NEW "<work item 3>"
+```
+
+User sees the shape, can redirect, then the orchestrator dispatches each `suggest` call in order.
+
+**Check 1: Does this belong under an existing parent?** Match against In Progress and To-Do rows. If the new work is a sub-deliverable, follow-up, related artifact, or supporting piece of one of those initiatives, parent it there with `--parent=<id>`. Don't create siblings of an umbrella you can attach to.
+
+**Check 2: Is this a batch of 3+ related rows?** Create a container row first, then add each work item as a child. A container is a task — title like "Landing page content series", "Onboarding flow rewrite", "API v2 migration" — with a coherent "all subtasks shipped" done state. It is NOT a folder. The container itself goes under the umbrella parent from Check 1 when one exists.
 
 **Decision matrix:**
 
 | Situation | Action |
 |---|---|
-| 1 task, unrelated to anything active | top-level `suggest` is fine |
+| 1 task, unrelated to anything active | `suggest --force-top-level` |
 | 1 task, clearly part of an active initiative | `suggest --parent=<active-initiative-id>` |
-| 2 tasks sharing a clear theme | up to judgment — often a container helps even at N=2 |
-| 3+ related tasks at once | container subtask first, then `--parent=<container-id>` for each work item |
-| 3+ flat top-level rows that share a theme | this is the failure mode — don't do it |
+| 2 tasks sharing a clear theme | container helps even at N=2; use judgment |
+| 3+ related tasks at once | container subtask first, then `--parent=<container-id>` for each |
+| 3+ flat top-level rows that share a theme | **the failure mode — never do this** |
+| unsure whether a parent exists | read `state/task-tree.json` first, always |
 
-**Ownership: the orchestrator, not the subagent, makes the structure call.** Before any `suggest` batch dispatches, the orchestrator must (a) check for an existing umbrella parent, (b) decide whether a container is needed, (c) write down the planned tree in chat so the user can correct it before mutations fly. The subagent then executes the orchestrator's plan verbatim — it does not second-guess the parent assignment, and it does not invent containers mid-batch.
+**Ownership: the orchestrator, not the subagent, makes the structure call.** Before any `suggest` batch dispatches, the orchestrator must (a) read the tree snapshot, (b) check for an existing umbrella, (c) decide whether a container is needed, (d) print the planned tree in chat so the user can correct it. The subagent executes the orchestrator's plan verbatim — it does not invent or reassign parents mid-batch. The `suggest` structure preflight is a safety net for single-row calls, not a replacement for the orchestrator's upfront planning on batches.
 
-**Reparenting existing rows.** When the user asks to "reorganize", "restructure", "group under <parent>", or "move <task> under <other-task>" — that's `update --parent=<id>` (one row at a time) or, for bulk reorganization, the orchestrator plans the new tree, creates any new container rows via `suggest --parent`, then reparents the existing rows via `update --parent`.
+**Reparenting existing rows.** When the user asks to "reorganize", "restructure", "group under <parent>", or "move <task> under <other-task>" — that's `update --parent=<id>` (one row at a time) or, for bulk reorganization, the orchestrator plans the new tree (show it in chat), creates any new container rows via `suggest --parent`, then reparents the existing rows via `update --parent`.
 
 ### The "move this chat to Notion" workflow
 
@@ -468,7 +541,7 @@ When the user says "save this to Notion", "make this a task", "track this in Not
 
 ## Command: `approve <id>`
 
-Promote a task from Discussion -> To-Do, cascading active children.
+Promote a task from Discussion -> To-Do, cascading active children. **Requires explicit user authorization for the specific row or batch** (see "Authorization gates" above) — `approve` is a Gate-1 transition, never run it on the orchestrator's initiative.
 
 1. Sync preflight.
 2. Resolve `<id>`. Verify status is `Discussion` (or `Suggestion` — fast-track allowed). Refuse otherwise.
@@ -785,6 +858,35 @@ Subtasks are shown indented under their parent unless `--flat` is passed.
 
 ---
 
+## Command: `tree [--depth N] [--corpus=<s>] [--status=<s>]`
+
+Emit a compact indented view of the active task hierarchy and refresh `state/task-tree.json`. This is the primary tool for understanding the board's shape before adding new work.
+
+Default scope: all non-terminal rows (Suggestion, Discussion, To-Do, In Progress). `--status` filters to a specific status. `--corpus` narrows to one corpus. `--depth N` truncates at N levels (default: unlimited).
+
+1. Sync preflight (this also writes `task-tree.json` as a side-effect — see Sync section).
+2. Build the tree from the live result: group rows by `Parent Task`, render depth-indented.
+3. Output as plain markdown (links clickable, not a fenced block):
+
+   ```
+   [OS-12](url) "Top-level initiative"  [In Progress · General · L]
+     [OS-13](url) "Container subtask"  [To-Do · M]
+       [OS-14](url) "Leaf work item"  [To-Do · S]
+     [OS-15](url) "Another subtask"  [Suggestion · M]
+   [OS-16](url) "Unrelated top-level"  [To-Do · Recurring · M]
+   ```
+
+4. After the tree, print a one-line summary: `<N> tasks across <K> top-level roots  (snapshot written to state/task-tree.json)`.
+
+**When to call `tree`:**
+- At the start of any session where you'll be adding or reorganizing tasks.
+- Before any batch `suggest` operation, if `state/task-tree.json` is absent or you're unsure of the current shape.
+- Whenever the user asks "what's the structure", "show me the hierarchy", "how is this organized".
+
+`tree` is a read-only command — it never mutates Notion, only refreshes the local snapshot.
+
+---
+
 ## Command: `show <id> [--section ...] [--entry <date>]`
 
 Read a task's content without mutating state. Always include a `[<title>](<url>)` link at the top of the output before showing the requested content.
@@ -821,15 +923,16 @@ When the user says these things in chat, the skill translates to commands:
 
 | User says | Skill calls |
 |---|---|
-| "add a suggestion: <title>" / "new idea: <title>" | `suggest "<title>"` (asks for corpus if ambiguous; runs the parent-discipline check first — see "Structuring work") |
-| "create N tasks for X, Y, Z" / "batch add: ..." / "set up tasks for <multi-part work>" | orchestrator FIRST runs the parent-discipline check (existing umbrella? container needed?), proposes the tree in chat, THEN dispatches `suggest --parent=<id>` per item |
+| "what's the structure" / "show me the hierarchy" / "how is this organized" / "what tasks are active" | `tree` |
+| "add a suggestion: <title>" / "new idea: <title>" | `suggest "<title>"` — structure preflight runs inside; if an obvious parent exists the subagent will surface it and wait for confirmation before creating the row |
+| "create N tasks for X, Y, Z" / "batch add: ..." / "set up tasks for <multi-part work>" | orchestrator reads `state/task-tree.json` (or runs `tree` if absent), proposes the full planned tree in chat (existing umbrella? container needed?), waits for user confirmation, THEN dispatches `suggest --parent=<id>` per item |
 | "reorganize <X>" / "restructure under <parent>" / "move <task> under <other-task>" / "group these tasks" | `update <id> --parent=<parent-id>` per row (or `--parent=none` to demote) |
 | "let's discuss X" / "open X for discussion" | `discuss <id>` |
 | "log: <thing>" / "note that <thing>" (during discuss) | `log <id> "<thing>"` |
 | "add a subtask: <title>" / "we'll also need to <thing>" | `add-subtask <parent-id> "<title>"` |
-| "approve" / "approve it" / "ship it" / "go ahead" | `approve <id>` |
+| "approve" / "approve it" / "ship it" / "go ahead" | `approve <id>` (Gate-1 — user must name the row or explicit batch; never auto-cascade beyond what the user said) |
 | "start X" / "launch X" / "let's do X now" | `start <id>` |
-| "run todo" / "run all" / "execute the queue" | `run` (dry-run) -> user reviews -> `run --go` |
+| "run todo" / "run all" / "execute the queue" | `run` (dry-run) -> user reviews -> `run --go`. Gate-3 — `--go` is added ONLY when the user explicitly says go/fire/yes. NEVER cascade-approve or flip Exec=Agent as a "prep step" — execute only rows that already meet `Status=To-Do AND Exec=Agent` literally |
 | "X is done [link <url>]" / "mark X done" | `done <id> [--result-link <url>]` |
 | "kill X" / "drop X" / "X is no longer relevant" | `kill <id>` |
 | "make X recurring weekly" / "X is recurring monthly" | `update <id> --type=recurring --cadence=weekly` |
@@ -874,6 +977,9 @@ Migrating from an existing Notion setup:
 ## What this skill does NOT do
 
 - **Does not auto-execute To-Do items.** `next` shows; only `start` (after explicit invocation) loads the brief and flips status.
+- **Does not auto-promote rows to To-Do.** Every transition into To-Do requires explicit user authorization for that row or batch (Gate 1). The orchestrator never cascade-approves a subtree on its own initiative, even when a downstream command would "need" rows in To-Do to proceed.
+- **Does not mark rows `Exec=Agent` without explicit authorization.** Exec is operator-owned (Gate 2). No subagent, no command, no natural-language path may set Exec=Agent unless the user named the row(s) and asked for it.
+- **Does not append `--go` to a `run` the user didn't write.** Dry-run is the default; the `--go` flag is the user's explicit dispatch signal (Gate 3).
 - **Does not write content, deploy, or run any other skill.** It mutates Notion. The brief may **point** an agent at another skill, but this skill never invokes one.
 - **Does not delete content.** `kill` is terminal but archival; the row remains in Notion. To truly remove, archive in Notion manually.
 - **Does not commit or push to git** beyond `notion-pointers.json` (which scaffold writes).
