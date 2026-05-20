@@ -8,6 +8,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-20
+
+### Changed
+- **SKILL.md restructured for token efficiency.** Cut from 1040 lines to ~420 lines (~60% smaller) by splitting each command spec into its own file under `references/commands/`. Subagents now load the slim SKILL.md plus only the one command file they need per dispatch, instead of the full monolith. The 0.2.5 local-mirror sync section (`scripts/sync-tasks.py`, `state/tasks.json` schema, write-through-on-mutations rule) is preserved verbatim.
+- **Frontmatter description slimmed** (~620 → ~290 chars). Keeps highest-signal trigger phrases; drops verbose mechanics description that lived in the description field.
+- **Sonnet dispatch prompt compacted** in the Execution model section. Subagent is now explicitly instructed to read `references/commands/<command>.md` alongside SKILL.md. Still references `python .claude/skills/agency-os/scripts/sync-tasks.py via Bash` for incremental sync and the STRUCTURE CHECK protocol.
+- **"Structuring work" content** (parent vs subtask vs log entry rules, structure preflight protocol, "move chat to Notion" workflow, worked example) extracted to `references/structuring-work.md`. SKILL.md keeps a pointer; `suggest` and `add-subtask` reference it.
+- **Bootstrapping section** moved to `references/bootstrapping.md`.
+
+### Added
+- **`references/commands/` directory** with 19 per-command spec files: `init`, `scaffold`, `suggest`, `discuss`, `log`, `add-subtask`, `approve`, `start`, `refresh`, `run`, `done`, `kill`, `next`, `status`, `list`, `tree`, `show`, `update`, `move`.
+
 ## [0.2.5] - 2026-05-20
 
 ### Added

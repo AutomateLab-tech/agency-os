@@ -1,6 +1,6 @@
 ---
 name: agency-os
-description: "Notion-as-source-of-truth dispatch board for running your work like an AI agency. One Tasks database is the source of truth; tasks flow Suggestion → Discussion → To-Do → In Progress → Done with subtasks, recurring cadences, dependencies, and template subtrees. Batch execution fans approved To-Do rows out to parallel agents with per-task model selection. Trigger when the user mentions: Notion tasks, agency board, /agency-os commands, capturing chat to Notion, running the To-Do queue, suggesting/approving/discussing tasks."
+description: "Notion-as-source-of-truth dispatch board. Status flow Suggestion→Discussion→To-Do→In Progress→Done with subtasks, recurring tasks, deps, batch agent execution. Trigger: 'suggest X', 'discuss X', 'approve', 'start X', 'run todo', 'mark X done', 'kill X', 'next', 'capture this to Notion', 'agency-os status'."
 ---
 
 # agency-os
@@ -36,38 +36,30 @@ This SKILL.md is the authoritative spec and is harness-agnostic. The slash-comma
 Per-harness wrappers only differ in two things:
 
 - **How commands are triggered.** Claude Code exposes them as real slash commands via the plugin manifest. Cursor / Cline / generic MCP harnesses load this file as instructions and rely on the user typing `/agency-os ...` (or the natural-language equivalent) into chat. Either way, the parser is the same.
-- **Whether mutations are delegated to a subagent.** The "Execution model" section below describes Claude Code's Haiku subagent dispatch. Other harnesses run mutations directly on the main agent. The Notion MCP calls underneath are identical; only the indirection changes.
+- **Whether mutations are delegated to a subagent.** The "Execution model" section below describes Claude Code's Sonnet subagent dispatch. Other harnesses run mutations directly on the main agent. The Notion MCP calls underneath are identical; only the indirection changes.
 
 See `docs/harnesses/` for per-harness setup. If you're reading this in a non-Claude-Code harness, treat the subagent dispatch instructions as optional: execute commands inline instead.
 
 ## Execution model — model selection by harness
 
-### Claude Code: delegate to Sonnet (medium reasoning) for mutations, orchestrator picks for batch execution
+### Claude Code: delegate to Sonnet (medium reasoning)
 
-Every `/agency-os <command>` invocation runs on **Sonnet at medium reasoning effort** via a subagent, not on the orchestrator's model. The work this skill does — resolve an ID, mutate a Notion row via MCP, format a brief — needs enough judgment (dedup checks, brief assembly, dependency reasoning) that Haiku slipped on edge cases; Sonnet at medium effort is the right balance of accuracy and cost. The orchestrator stays free for the conversation around the command.
-
-When the user invokes `/agency-os <command> <args>` (or the orchestrator translates a natural-language request into one — see "Natural-language driving" below), the orchestrator's only job is to dispatch:
+Every `/agency-os <command>` invocation runs on **Sonnet at medium reasoning effort** via a subagent. Sonnet at medium is the right balance for ID resolution, dedup, and brief assembly. The orchestrator stays free for conversation.
 
 ```
 Agent({
   description: "Run /agency-os <command>",
   subagent_type: "general-purpose",
   model: "sonnet",
-  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nUse medium reasoning effort — think through ID resolution, dedup checks, and brief assembly carefully, but don't over-deliberate on mechanical mutations.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (run `python .claude/skills/agency-os/scripts/sync-tasks.py` via Bash — this incrementally refreshes the local mirror at `state/tasks.json`; do NOT call notion-fetch on the full data source as a default read path), resolve IDs against the local mirror, mutate Notion via the Notion MCP, write-through patch the mirror with the MCP response in the same step, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. Claude Code renders markdown but not HTML, so HTML anchors show up as literal text. If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nSTRUCTURE CHECK (for `suggest` without `--parent`, and for any batch suggest): Before creating any row, read `.claude/skills/agency-os/state/task-tree.json` for the current active task hierarchy (written by the most recent `sync` or `tree` run). If the file is absent, call `/agency-os tree` first. Scan In-Progress and To-Do rows for an obvious umbrella parent. If a candidate exists with high confidence, surface it and require the orchestrator to confirm before proceeding. Never silently create a top-level row when an obvious parent exists. Full rules: SKILL.md under `Structuring work → Parent discipline`.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
+  prompt: "Run /agency-os <command> <args>.\n\nRead .claude/skills/agency-os/SKILL.md AND .claude/skills/agency-os/references/commands/<command>.md for the specific command spec. Execute end-to-end: sync preflight (run `python .claude/skills/agency-os/scripts/sync-tasks.py` via Bash — this incrementally refreshes the local mirror at `state/tasks.json`; do NOT call notion-fetch on the full data source as a default read path), resolve IDs against the local mirror, mutate Notion via the Notion MCP, write-through patch the mirror with the MCP response in the same step, and return the exact output format the command file specifies. All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. If anything fails (sync, MCP, ID resolution), stop and report — do not guess.\n\nSTRUCTURE CHECK (for `suggest` without `--parent`, and for any batch suggest): Before creating any row, read `.claude/skills/agency-os/state/task-tree.json` for the current active task hierarchy. If the file is absent, call `/agency-os tree` first. Scan In-Progress and To-Do rows for an obvious umbrella parent. If a candidate exists with high confidence, surface it and require the orchestrator to confirm before proceeding. Never silently create a top-level row when an obvious parent exists. Full rules: `references/structuring-work.md`.\n\nALWAYS PRODUCE OUTPUT. On success: the skill's standard output. On failure: one paragraph naming what failed and what state Notion was left in. Returning nothing is not an option."
 })
 ```
 
-**The orchestrator MUST always relay the subagent's result to the user — no exceptions.**
+**Orchestrator MUST relay subagent output verbatim.** If output is empty: say `subagent returned no output; check Notion directly.` Never re-run, never absorb silently.
 
-- If the subagent produced output: pass it through verbatim.
-- If the subagent returned empty output or no output at all: say so explicitly — `subagent returned no output; execution status unknown. Check Notion directly.`
-- Never absorb the result silently. Never say "I don't have information about what happened." If you don't know, say you don't know and tell the user to check Notion.
+**Natural-language driving stays on the orchestrator.** Parsing "let's discuss the X task" into `/agency-os discuss <id>`, asking clarifying questions during a discussion, deciding `log` vs `add-subtask` — that runs on the orchestrator so thread context survives. Only discrete mutations dispatch to Sonnet.
 
-Do **not** re-run any step yourself, do not "double-check" the subagent's work.
-
-**Natural-language driving stays on the orchestrator.** Parsing "let's discuss the X task" into `/agency-os discuss <id>`, asking the user clarifying questions during a discussion, deciding when to call `log` vs `add-subtask` — that conversation runs on the orchestrator so thread context survives across turns. Only the discrete mutation (each `log`, each `add-subtask`, each `approve`) dispatches to the Sonnet subagent.
-
-Rule of thumb: anything that touches Notion via the MCP -> Sonnet subagent. Anything that's deciding *what* to touch -> orchestrator.
+Rule of thumb: touches Notion via MCP → Sonnet subagent. Deciding *what* to touch → orchestrator.
 
 ### Non-Claude harnesses: read models from config.json
 
@@ -89,62 +81,56 @@ The config file has this shape:
 }
 ```
 
-The `/agency-os run` command still uses the same picker heuristic (Haiku for mechanical work, Sonnet default, Opus for strategic) — but on non-Claude harnesses, you need to ensure your harness has an API or SDK integration with those models (e.g., via the Anthropic SDK in a Continue custom tool). If your harness only supports one model, set all three to that model and the skill will use it for everything.
+The `/agency-os run` command still uses the same picker heuristic (Haiku for mechanical work, Sonnet default, Opus for strategic) — but on non-Claude harnesses, you need to ensure your harness has an API or SDK integration with those models. If your harness only supports one model, set all three to that model.
 
 ---
 
 ## Authorization gates — no auto-promotion, no auto-execution
 
-Two transitions in this skill have outsized blast radius and require **explicit user authorization** every time. The skill must never make either move on its own initiative, even when "obvious from context." If in doubt about scope or intent, **ask before mutating** — a clarifying chat turn is cheap; a wrong-direction bulk promotion is a full revert pass plus operator trust.
+Three transitions require **explicit user authorization** every time. The skill must never make these moves on its own initiative.
 
-**Gate 1 — Promoting to To-Do.** Any transition into `To-Do` (via `approve`, `move --to todo`, or any direct `notion-update-page` write to the Status property) is a scheduling commitment by the operator. The orchestrator (and any spawned subagent) MUST NOT promote a row to To-Do unless the user has named that row, or named an explicit batch the row clearly belongs to. "Approve every Discussion descendant of <task>" is in scope when the user said exactly that. "The user wants everything under <task> executed, so let me cascade-approve the discussion descendants first" is **not** — that's auto-promotion, the failure mode this gate exists to prevent.
+**Gate 1 — Promoting to To-Do.** Any transition into `To-Do` (via `approve`, `move --to todo`, or direct Status write) is a scheduling commitment. MUST NOT promote unless the user named that row or an explicit batch the row clearly belongs to. "Cascade-approve discussion descendants because the user wants the parent executed" is **forbidden** — that's auto-promotion. Recurring-loop auto-flip on `done` is the only exception (the operator authorized it when marking Type=recurring).
 
-The recurring-loop auto-flip on `done` (Type=recurring rows reset to To-Do with Last Done bumped) is the only exception — the operator authorized the loop when they marked Type=recurring originally.
+**Gate 2 — Marking Exec=Agent.** Operator-owned. Skill MUST NOT set `Exec=Agent` on any row unless the user explicitly named that row and asked for it. Bulk-flipping across a subtree because "these look agent-runnable" is forbidden. `Exec=Human` and `Exec=none` are safe defaults; only `Exec=Agent` requires the gate.
 
-**Gate 2 — Marking Exec=Agent.** Setting `Exec=Agent` makes a row dispatchable by `run --go` without further confirmation. This property is operator-owned: in normal flow the operator flips Exec=Agent in Notion's UI on rows they want agents to handle. The skill MUST NOT set `Exec=Agent` on any row — not via `update`, not via direct `notion-update-page`, not as a side effect of any other command — unless the user has explicitly named that row (or that explicit set) and asked for it. Bulk-flipping Exec=Agent across a subtree because "these all look agent-runnable" is forbidden. `Exec=Human` and `Exec=none` are safe defaults; only `Exec=Agent` requires the gate.
+**Gate 3 — Firing the queue.** `/agency-os run` is dry-run by default; `--go` is the user's explicit dispatch authorization. Orchestrator never adds `--go` to a `run` call the user did not type.
 
-**Gate 3 — Firing the queue.** `/agency-os run` is dry-run by default; `--go` is the user's explicit dispatch authorization. The orchestrator never adds `--go` to a `run` call the user did not type. Natural-language "execute the queue" / "run todo" maps to `run` (dry-run); the user reviews the plan, then says "go" / "fire it" / "yes" -> only then `run --go`.
+**Worked failure mode.** User says "execute all todo tasks under OS-XXX" → dispatch rows that are *already* `Status=To-Do AND Exec=Agent` under OS-XXX. Does NOT authorize flipping Discussion descendants to To-Do, flipping leaves to Exec=Agent, or any prep step. If literal scope yields zero runnable rows, say so and ask — do not invent prep.
 
-**Worked failure mode to avoid.** User says "execute all todo tasks under <task>". This means: dispatch rows that are *already* `Status=To-Do AND Exec=Agent` under that task. It does NOT authorize flipping Discussion descendants to To-Do, flipping leaves to Exec=Agent, or any other preparation step. If the user wanted that, they would have said "approve all subtasks of <task>, mark them Exec=Agent, then run them." Take the instruction literally; if the literal scope yields zero runnable rows, say so and ask — do not invent a prep batch.
-
-**When in doubt — ask.** If a user instruction could plausibly mean "promote to To-Do" or "mark Exec=Agent" or "fire the queue" but doesn't name the specific row(s) or the specific gate, the orchestrator MUST ask before mutating. List candidates, wait for selection, then act. Never guess the set.
+**When in doubt — ask.** List candidates, wait for selection, then act. Never guess the set.
 
 ---
 
 ## What lives where (hybrid contract)
 
-This skill is the one place where the project's local-vs-Notion split is enforced. Get this wrong and you either spam MCP tokens reading what should be a file, or you put mutable state somewhere git can't roll it back.
+- **Local, source-of-truth:** every skill spec under `.claude/skills/`, every doc under `docs/`, the `notion-pointers.json` binding, and `references/general-guidance.md` (the canonical General Guidance text — Notion's page is a one-way mirror).
+- **In Notion, source-of-truth:** task rows (Title / Status / Corpus / Priority / Impact / Type / Cadence / Effort / Parent Task), discussion logs, done logs, corpus pages, the Hub itself.
+- **One-way mirror:** `references/general-guidance.md` → Notion General Guidance. Edit locally, push to Notion. Never reverse-sync.
 
-- **Local, in this repo, source-of-truth:** every skill spec under `.claude/skills/`, every doc under `docs/`, the `notion-pointers.json` binding, and `references/general-guidance.md` (the canonical General Guidance text — Notion's page is a one-way mirror). Agents read these directly off disk — fast, free, greppable, diffable.
-- **In Notion, source-of-truth:** task rows (Title / Status / Corpus / Priority / Impact / Type / Cadence / Effort / Parent Task), discussion logs, done logs, corpus pages (Goal + local guidance the operator authors), and the Hub itself with its DB views. Anything the operator wants to review-in-place, anything that changes frequently, anything that doesn't benefit from `git log`.
-- **One-way mirror, not two-way:** `references/general-guidance.md` -> Notion General Guidance page is the only sync direction. Edit the local file, then push to Notion (via `scaffold` or a manual `update`). Never edit the Notion page and try to reverse-sync it; drift will follow.
-
-When this skill assembles a brief for an agent, it pulls **task state** from Notion (the row, the discussion log, subtask titles) and **stable spec** from local files (general guidance, corpus local guidance if those are mirrored, links into `docs/` and `.claude/skills/`). The brief contains pointers to local files, not copies of them, so the agent can grep further when it needs to.
+Briefs pull **task state** from Notion (via the local mirror) and **stable spec** from local files. The brief contains pointers to local files, not copies.
 
 ```
 # setup
 /agency-os scaffold [--parent=<page-id-or-url>] [--corpora="<n1>,<n2>,..."]
-                                                          # idempotent: builds the full Notion workspace from scratch (Hub, Tasks DB, corpus pages, views). No Notion template duplication required.
-/agency-os init [--harness claude-code|cursor|cline|continue|generic-mcp] [--haiku=<model>] [--sonnet=<model>] [--opus=<model>]
-                                                          # configure model selection (non-Claude harnesses only; Claude Code ignores this)
-/agency-os sync                                           # preflight: verify live Notion connection and pointer IDs
-/agency-os tree [--depth N] [--corpus=<s>] [--status=<s>] # compact hierarchy snapshot; also writes state/task-tree.json
+/agency-os init [--harness ...] [--haiku=...] [--sonnet=...] [--opus=...]
+/agency-os sync
+/agency-os tree [--depth N] [--corpus=<s>] [--status=<s>]
 
 # suggestions
 /agency-os suggest "<title>" [--corpus=<s>] [--type one-time|recurring]
-                              [--cadence daily|weekly|biweekly|monthly|quarterly|yearly]
-                              [--notes "..."] [--effort S|M|L|XL] [--parent=<id>]
+                              [--cadence ...] [--notes "..."] [--effort S|M|L|XL]
+                              [--parent=<id>] [--force-top-level]
 
 # clarification & subtasks
-/agency-os discuss <id>                                   # Suggestion -> Discussion + load context for clarification
-/agency-os log <id> "<entry>"                             # append a discussion entry
-/agency-os add-subtask <parent-id> "<title>" [--effort=<e>] [--notes "..."] [--deps=<id1>,<id2>,...]
-/agency-os approve <id>                                   # Discussion -> To-Do; cascades active subtasks
+/agency-os discuss <id>
+/agency-os log <id> "<entry>"
+/agency-os add-subtask <parent-id> "<title>" [--effort=<e>] [--notes "..."] [--deps=...]
+/agency-os approve <id>
 
 # execution
-/agency-os start <id>                                     # To-Do -> In Progress + emit kickoff brief
-/agency-os refresh                                        # auto-enumerate Status=To-Do AND Exec=Agent via Notion REST API, write state/todo-ids.json
-/agency-os run [--go]                                     # batch-execute the To-Do sidecar; orchestrator picks model per task
+/agency-os start <id>
+/agency-os refresh
+/agency-os run [--go]
 /agency-os done <id> [--result-link <url>] [--note "..."]
 /agency-os kill <id> [--reason "..."]
 
@@ -156,14 +142,15 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 
 # escape hatches
 /agency-os update <id> [--title="..."] [--notes="..."] [--priority=1|2|3|4]
-                       [--effort=S|M|L|XL]
-                       [--type=one-time|recurring] [--cadence=...] [--corpus=<s>]
+                       [--effort=...] [--type=...] [--cadence=...] [--corpus=<s>]
                        [--deps=<id1>,<id2>,...|none] [--parent=<id>|none]
-/agency-os move <id> --to <status>                        # force any status transition
+/agency-os move <id> --to <status>
 /agency-os add-corpus "<name>" [--goal "..."]
 ```
 
-**Natural language is also a trigger.** When the user says "add a suggestion to ...", "let's discuss the X task", "log: agreed to ...", "add a subtask: ...", "approve that", "make weekly task recurring", "mark X done with link <url>", "kill the Y idea" — the skill mutates Notion the same way it would for the slash command equivalent. The slash commands are the canonical interface; natural language is a convenience layer.
+**Natural language is also a trigger** — see the "Natural-language driving" table below.
+
+**Command specs** live in `references/commands/<name>.md`. The subagent loads SKILL.md + the one command file for the dispatched command.
 
 ---
 
@@ -173,23 +160,19 @@ When this skill assembles a brief for an agent, it pulls **task state** from Not
 Suggestion --discuss--> Discussion --approve--> To-Do --start--> In Progress --done--> Done
                                                                              ^
    any  --kill-->  Killed  (terminal)                                        |
-                                                                             |
-                              Recurring tasks: done logs an occurrence and   |
-                              loops back to To-Do with Last Done updated. ---+
+                              Recurring tasks: done logs + loops to To-Do ---+
 ```
 
 | Status | Meaning | Set by |
 |---|---|---|
-| `Suggestion` | Idea in the inbox; not yet discussed | `suggest`, manual Notion add |
-| `Discussion` | Under clarification; subtasks may be emerging; not yet approved | `discuss` |
-| `To-Do` | Approved scope; scheduled to execute | `approve`, recurring loop on `done` |
-| `In Progress` | An agent is actively working it; brief has been emitted | `start` |
-| `Done` | Closed (one-time only) | `done` (when `Type=one-time`) |
+| `Suggestion` | Idea in the inbox; not yet discussed | `suggest`, manual |
+| `Discussion` | Under clarification | `discuss` |
+| `To-Do` | Approved; scheduled | `approve`, recurring loop |
+| `In Progress` | Agent actively working | `start` |
+| `Done` | Closed (one-time) | `done` |
 | `Killed` | Intentionally dropped | `kill` |
 
-The picker filters on `Status == "To-Do"`, prioritising `1` then `2` then `3` then `4` then unset, and within that by Created ascending. The launcher requires `Status == "To-Do"`. The suggestor refuses dupes against any non-terminal status by Title-Jaccard >= 0.8.
-
-If `start` crashes, the row sits at In Progress. Manual recovery: `/agency-os move <id> --to todo` or flip Status in Notion directly.
+`next` filters `Status == "To-Do"` sorted by Priority asc then Created asc. `run` requires `Status == "To-Do" AND Exec == "Agent"`. `suggest` refuses dupes via Title-Jaccard ≥ 0.8 against any non-terminal status. If `start` crashes, manual recovery: `/agency-os move <id> --to todo`.
 
 ---
 
@@ -289,66 +272,60 @@ Tasks  (database)
 | `Cadence` | select | `daily`, `weekly`, `biweekly`, `monthly`, `quarterly`, `yearly`. Empty for `one-time` |
 | `Last Done` | date | Set on `done` for recurring |
 | `Corpus` | select | One of the configured corpora |
-| `Priority` | select | `1`, `2`, `3`, `4` — **urgency** (1 = blocks something this week / 2 = this month / 3 = this quarter / 4 = nice to have / default). Lower number = higher urgency. Default `4` |
-| `Impact` | select | `low`, `medium`, `high`, `outsized` — outcome size **within the task's corpus**, independent of urgency. Default `medium` |
+| `Priority` | select | `1`–`4` — **urgency** (1 = this week / 4 = nice to have). Default `4` |
+| `Impact` | select | `low`, `medium`, `high`, `outsized` — outcome size within corpus. Default `medium` |
 | `Effort` | select | `S`, `M`, `L`, `XL`. Default `M` |
-| `Exec` | select | `none` (default), `Agent`, `Human`. Operator-set gate: only `Agent`-marked To-Do rows enter the `run` queue |
-| `Parent Task` | relation (self) | Set on subtasks; empty for top-level tasks |
-| `Subtasks` | rollup | Auto-rolled from inverse of Parent Task; surfaces count |
+| `Exec` | select | `none` (default), `Agent`, `Human`. Operator-set gate for `run` |
+| `Parent Task` | relation (self) | Subtask linkage; empty for top-level |
+| `Subtasks` | rollup | Inverse of Parent Task |
 | `Created` | created_time | Automatic |
-| `Done At` | date | Set on terminal `Done` (one-time) |
-| `Result Link` | url | Live link, post URL, PR URL, etc. |
-| `Tags` | multi_select | Cross-cutting concerns (user-defined) |
-| `Dependencies` | relation (self) | IDs of tasks that must reach `Done` before this row is dispatchable. Used only by `run` to stage execution; ignored by `start`, `next`, `list`. Empty by default |
+| `Done At` | date | Set on terminal `Done` |
+| `Result Link` | url | Live link, post URL, PR URL |
+| `Tags` | multi_select | Cross-cutting |
+| `Dependencies` | relation (self) | Must reach `Done` before this row is dispatchable by `run`. Ignored by `start`, `next`, `list` |
 
 ### Task page body
 
-Every task page uses **toggleable H2 sections** so the DB grid stays clean and details fold on click. Created via Notion's `is_toggleable: true` heading flag (Notion API). If the MCP path can't set the flag, fall back to plain H2; the user can toggle manually.
+Every task page uses **toggleable H2 sections** (`is_toggleable: true`). If the MCP can't set the flag, fall back to plain H2.
 
 ```
 > Launch this task
 > Paste in Claude Code: `/agency-os start <id>`
 
 Description     <- starts expanded
-   <freeform: what to do, why, acceptance criteria, links to docs/skills>
+   <freeform: what to do, why, acceptance criteria, links>
 
-Subtasks        <- starts expanded if any subtasks exist, else hidden
-   (linked DB view: Parent Task = this, sort Created asc)
+Subtasks        <- expanded if any exist
+   (linked DB view: Parent Task = this)
 
-Discussion log  <- starts collapsed
+Discussion log  <- collapsed
    ### 2026-01-10 — initial clarification
-   Q: ...
-   A: ...
-   Decisions:
-   - ...
+   ...
 
-Done log        <- starts collapsed; only meaningful for recurring
+Done log        <- collapsed; mainly for recurring
    ### 2026-01-12: completed by agent — link <url>
 
-Related         <- starts expanded; one-line each
+Related         <- expanded; one-line each
    Corpus: [-> <corpus>](<corpus-url>)
    General guidance: [-> Guidance](<guidance-url>)
-   Parent: [-> <parent-title>](<parent-url>)   <- only for subtasks
+   Parent: [-> <parent-title>](<parent-url>)
 ```
 
 ### Corpus pages
 
 ```
 # Corpus: <name>
-
 ## Goal
-1-3 sentences on what "done" looks like for this whole corpus.
-
+1-3 sentences on what "done" looks like.
 ## Local guidance
-Conventions, owners, references. Anything an agent needs before its first task here.
-
+Conventions, owners, references.
 ## Tasks
 (linked DB view: Corpus = this, group by Status)
 ```
 
 ### General Guidance page
 
-Project-wide rules: link into `docs/`, link into `.claude/skills/`, the launch flow, house style. Kept short. Links beat duplication. Seeded from `references/general-guidance.md` — edit the local file, push the mirror.
+Project-wide rules. Kept short. Links into `docs/` and `.claude/skills/`. Links beat duplication. Seeded from `references/general-guidance.md` — edit the local file, push the mirror.
 
 ---
 
@@ -370,588 +347,41 @@ Project-wide rules: link into `docs/`, link into `.claude/skills/`, the launch f
   "corpora": {
     "General": { "page_id": "<uuid>", "url": "...", "title": "General" }
   },
-  "hub_views": { "Suggestions Inbox": "view://<uuid>", ... },
+  "hub_views": { "Suggestions Inbox": "view://<uuid>", "...": "..." },
   "corpus_views": { "General": "view://<uuid>" },
-  "schema_summary": { ... }
+  "schema_summary": { }
 }
 ```
 
 ---
 
-## Command: `init [--harness=...] [--haiku=...] [--sonnet=...] [--opus=...]`
+## Commands
 
-**Non-Claude harnesses only.** Configure which models to use for task execution. Claude Code harnesses ignore this; they have built-in model selectors.
+Each command's full spec lives in its own file. The dispatch subagent loads this SKILL.md plus the one relevant file.
 
-**Why it matters:** Cursor, Cline, Continue, and generic MCP harnesses can't spawn subagents with different models on the fly. Instead, store your preferred models upfront in `.claude/skills/agency-os/config.json`, then the skill uses them during batch execution.
-
-**Interactive mode** (recommended):
-```
-/agency-os init
-```
-
-Prompts:
-1. Which harness are you using? (or auto-detect from environment)
-2. For *easy* mechanical tasks (form fills, recurring routines), which model? (default: haiku-4-5)
-3. For *medium* substantive work (drafting, audits, revisions), which model? (default: sonnet-4-6)
-4. For *hard* strategic work (design, multi-skill reasoning), which model? (default: opus-4-7)
-
-Stores in `.claude/skills/agency-os/config.json` and prints `config: created -> <path>`.
-
-**Non-interactive mode:**
-```
-/agency-os init --harness cursor --haiku claude-haiku-4-5 --sonnet claude-sonnet-4-6 --opus claude-opus-4-7
-```
-
-If a harness doesn't support a model (e.g., Cursor is configured for only Sonnet), pass the model it does support for all three tiers; the skill will use it for everything.
-
-If `config.json` already exists, re-running `init` overwrites it. To reset: `/agency-os init` interactively.
-
----
-
-## Command: `scaffold [--parent=<id-or-url>] [--corpora="<n1>,<n2>,..."]`
-
-**The single-shot setup command.** Builds the entire Notion workspace from scratch — Hub page, Tasks database with the full schema below, General Guidance page, Resources page, default corpus pages (`General`, `Recurring`), and every linked DB view. There is no public Notion template to duplicate; this command IS the setup. The integration only needs to be shared with the parent (workspace root or `--parent` page) before running.
-
-Idempotent: if `notion-pointers.json` exists and every ID resolves via `notion-fetch`, prints `scaffold: already in place` and exits. Otherwise creates only what's missing.
-
-1. **Locate or create the Hub**. If `--parent=<page-id-or-url>` is passed, create the Hub as a child of that page (use this when the integration is shared with a specific page rather than the workspace root). Otherwise: search by title at workspace root; create there if absent. If the create fails because the integration lacks workspace-root access, abort with `scaffold: integration must be shared with the workspace root, or pass --parent=<page-id>`.
-2. **Create the Tasks database** as a child of the Hub, with the schema above. Capture both `database_id` and `data_source_id`. The `Dependencies` property is a self-relation on Tasks (separate from `Parent Task` — that's the hierarchy relation; `Dependencies` is the gating relation used only by `run`).
-3. **Create the General Guidance page** under the Hub; seed body from `references/general-guidance.md`.
-4. **Create each Corpus page** under the Hub. Default set: `General`, `Recurring` (user can customise via `--corpora` flag or add later with `add-corpus`). Seed each from `references/corpus-template.md`.
-5. **Create the Resources page** under the Hub; seed from `references/resources.md` if present.
-6. **Add linked DB views** to the Hub for Suggestions Inbox, In Discussion, To-Do, Recurring, In Progress, Recently Done. Add a per-corpus filtered view to each Corpus page. Every view's SHOW clause must include `Task ID` as the leftmost column so subtask IDs are reachable at a glance.
-7. **Wire interlinks** (Hub <-> Guidance <-> Corpora <-> Resources).
-8. **Write `notion-pointers.json`**.
-9. **Full-width pages — manual one-time toggle.** The Notion MCP doesn't expose `page_full_width`, so Hub / Guidance / Resources / each Corpus page / new task pages need the ... menu -> "Full width" toggle flipped on by the operator after creation. Surface this in scaffold's final output so the operator knows to do it.
-10. **Sub-items — manual one-time toggle.** The Notion MCP doesn't expose the Sub-items setting either. On the Tasks DB, the operator must enable Sub-items and wire it to the existing `Parent Task` (parent) / `Subtasks` (children) relation. Path varies by Notion version: typically `...` menu -> "Sub-items" -> pick `Parent Task`. Once wired, every view in the Hub gets a chevron on rows with children.
-11. **Print** the Hub URL.
-
-`add-corpus "<name>"` extends the General Plan post-scaffold: appends a `Corpus` select option, creates the page, adds the filtered view, updates pointers. Print: `+ Corpus: [<name>](<url>)`.
-
----
-
-## Command: `suggest "<title>" ...`
-
-Add a row in `Suggestion` status. **Structure check runs inside `suggest`** — the subagent enforces it, not just the orchestrator. The orchestrator decides the shape (which parent, whether a container is needed); `suggest` verifies that decision was made rather than silently creating a root-level row.
-
-1. **Structure preflight (skip only when `--parent` is provided or `--force-top-level` is passed).**
-   - Read `state/task-tree.json` for the active task tree. If the file is absent, it will be built as a side-effect of the sync preflight in step 2 — proceed.
-   - Scan In-Progress and To-Do **top-level** rows for an obvious umbrella. "Obvious" = the candidate's title or corpus clearly covers the work being suggested (confidence >= 80%).
-   - If one candidate: `Candidate parent: [<title>](<url>) — attach as subtask? Reply with --parent=<id> to confirm, or --force-top-level to create at root.` **Stop and wait** for the orchestrator to relay the answer. Do not create the row until confirmed.
-   - If multiple candidates: list all, wait.
-   - If no candidate: proceed silently.
-2. Sync preflight.
-3. Validate: `--corpus` is in pointers (else list and refuse); if `--type=recurring`, `--cadence` is required. If `--parent=<id>` is provided, resolve it live and refuse if unknown, Done, or Killed; refuse self-reference and cycles.
-4. **Dedup check**: refuse if Title-Jaccard >= 0.8 against any row with status in `{Suggestion, Discussion, To-Do, In Progress}`.
-5. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status=Suggestion, Corpus, Type, Cadence (if recurring), Effort. If `--parent=<id>` provided, also set Parent Task to that id and inherit Corpus from the parent unless `--corpus` was explicitly passed. Page body = `task-page-template.md` rendered.
-6. If `--notes` provided, write into the Description section.
-7. **Update tree snapshot**: append the new row to `state/task-tree.json` so the snapshot stays current without a full re-fetch.
-8. Print: `+ Suggestion: [<title>](<url>){  parent=<parent-title>}`.
-
-`--parent` makes `suggest` the canonical way to create a row under any existing task. `add-subtask` remains a convenience for the in-discussion flow (it inherits parent's status; `suggest --parent` always lands in Suggestion). `--force-top-level` is the explicit override when a root-level task is genuinely unrelated to any active initiative — it skips the structure preflight without a prompt.
-
----
-
-## Command: `discuss <id>`
-
-Begin clarification on a Suggestion. Flips status to Discussion and prepares the agent to ask clarifying questions.
-
-1. Sync preflight.
-2. Resolve `<id>` (UUID, URL, or unique Title substring against `Suggestion` rows).
-3. `notion-update-page` Status -> Discussion.
-4. **Print the discussion brief**: row properties + Description section. End with: `Ready to clarify. Ask your questions or paste new requirements; the skill will log them with /agency-os log <id> and create subtasks with /agency-os add-subtask <id>. [Open task](<task-url>)`
-5. The agent in this conversation now drives the clarification: it asks questions, accepts user answers, calls `log` for each round, calls `add-subtask` whenever the user's responses imply concrete new work.
-
-`discuss` does not require status to be `Suggestion` — calling it on an already-Discussion row is fine and reloads the brief.
-
----
-
-## Command: `log <id> "<entry>"`
-
-Append a discussion entry to the task page.
-
-1. Sync preflight.
-2. Resolve `<id>`.
-3. Find or create the `Discussion log` toggle on the page. Append a new dated entry:
-   ```
-   ### <YYYY-MM-DD> — <auto-summary first 6 words of entry>
-   <entry>
-   ```
-4. Print: `+ Logged: [<title>](<url>)`.
-5. If the entry contains lines starting with `+` they're treated as proposed subtasks and surfaced in the output: `note: detected N proposed subtasks; create with /agency-os add-subtask <id> "<title>"`.
-
-The agent should call `log` multiple times during a discussion — once per Q/A round, or once per cohesive thought — rather than dumping a single megalogue at the end. This keeps the log queryable by date.
-
----
-
-## Command: `add-subtask <parent-id> "<title>" ...`
-
-Create a subtask row.
-
-1. Sync preflight.
-2. Resolve `<parent-id>`. Refuse if parent's status is `Done` or `Killed`.
-3. `notion-create-pages` with parent = Tasks data source. Properties: Title, Status = parent's status (`Discussion` or `To-Do` typically), Corpus = parent's corpus, Parent Task = parent, Type = `one-time`, Effort from flag or default, Dependencies from `--deps` if provided (each id resolved live via Notion; refuse if any id is unknown).
-4. Append a line to the parent's Discussion log section: `### <date> — subtask added: [<title>](<url>)`.
-5. Print: `+ Subtask of <parent-title>: [<title>](<url>){  deps=N}`.
-
-Subtasks can have their own subtasks (nesting allowed; the skill doesn't enforce a depth limit but warns at depth >= 3).
-
----
-
-## Structuring work — parent vs subtask vs log entry
-
-The hardest part of using this board well is deciding **what shape** a piece of work takes. Three rules:
-
-**1. A task is a coherent unit with a clear "done" state.** It can be shipped, merged, published, decided. "Set up X integration" is a task. "Think about X" is not.
-
-**2. A subtask is a child task that can be completed independently and is bounded by a deliverable, not by a step.** "Write the onboarding blurb" is a subtask because the blurb is a separable artifact with its own done. "Click submit on the form" is not a subtask — log it in the discussion or done note instead.
-
-Rule of thumb: if you'd naturally hand it to a different agent on a different day, it's a subtask. If you'd do it inline while working the parent, it's a step.
-
-**3. A log entry is a decision, clarification, or update on existing scope.** "Decided to launch Tue not Wed" is a log entry. "Operator handles the review thread" is a log entry, not a subtask.
-
-### Depth
-
-- Top-level: standalone work or a top-level container.
-- Subtask (depth 1): the normal case. Most subtasks live here.
-- Nested subtask (depth 2): legitimate when a parent has multiple major deliverables, each with its own breakdown.
-- Depth 3+: the skill warns. Almost always means the hierarchy should be flattened or split into separate top-level tasks.
-
-### Parent discipline — never dump in root
-
-A flat list of unrelated top-level tasks is a smell. **Before creating ANY new row, the orchestrator MUST run the structure preflight.** This is non-negotiable for batch creation and required even for single rows when the work is clearly part of a broader initiative.
-
-#### Structure preflight protocol
-
-The fastest path: read `state/task-tree.json` (written by every `sync`, `tree`, or `suggest`). This file gives a full tree snapshot with no MCP round-trip. If it's absent, run `/agency-os tree` once to generate it — this is cheap and should be a first step whenever starting a new session or about to do batch work.
-
-```
-step 1 — read state/task-tree.json (or run /agency-os tree if absent)
-step 2 — scan top-level In Progress + To-Do rows for an umbrella match
-step 3 — if found: propose --parent=<id> in chat and wait for user confirmation
-          if batch (3+ rows): also propose the container row before any work items
-          if none found: proceed with top-level suggest
-```
-
-The orchestrator MUST **show the planned tree in chat** before any mutation flies. One-liner format:
-
-```
-Planned tree:
-  OS-12 "Umbrella initiative" [existing]
-    → NEW "Container: <theme>" [new container]
-      → NEW "<work item 1>"
-      → NEW "<work item 2>"
-      → NEW "<work item 3>"
-```
-
-User sees the shape, can redirect, then the orchestrator dispatches each `suggest` call in order.
-
-**Check 1: Does this belong under an existing parent?** Match against In Progress and To-Do rows. If the new work is a sub-deliverable, follow-up, related artifact, or supporting piece of one of those initiatives, parent it there with `--parent=<id>`. Don't create siblings of an umbrella you can attach to.
-
-**Check 2: Is this a batch of 3+ related rows?** Create a container row first, then add each work item as a child. A container is a task — title like "Landing page content series", "Onboarding flow rewrite", "API v2 migration" — with a coherent "all subtasks shipped" done state. It is NOT a folder. The container itself goes under the umbrella parent from Check 1 when one exists.
-
-**Decision matrix:**
-
-| Situation | Action |
+| Command | Spec file |
 |---|---|
-| 1 task, unrelated to anything active | `suggest --force-top-level` |
-| 1 task, clearly part of an active initiative | `suggest --parent=<active-initiative-id>` |
-| 2 tasks sharing a clear theme | container helps even at N=2; use judgment |
-| 3+ related tasks at once | container subtask first, then `--parent=<container-id>` for each |
-| 3+ flat top-level rows that share a theme | **the failure mode — never do this** |
-| unsure whether a parent exists | read `state/task-tree.json` first, always |
-
-**Ownership: the orchestrator, not the subagent, makes the structure call.** Before any `suggest` batch dispatches, the orchestrator must (a) read the tree snapshot, (b) check for an existing umbrella, (c) decide whether a container is needed, (d) print the planned tree in chat so the user can correct it. The subagent executes the orchestrator's plan verbatim — it does not invent or reassign parents mid-batch. The `suggest` structure preflight is a safety net for single-row calls, not a replacement for the orchestrator's upfront planning on batches.
-
-**Reparenting existing rows.** When the user asks to "reorganize", "restructure", "group under <parent>", or "move <task> under <other-task>" — that's `update --parent=<id>` (one row at a time) or, for bulk reorganization, the orchestrator plans the new tree (show it in chat), creates any new container rows via `suggest --parent`, then reparents the existing rows via `update --parent`.
-
-### The "move this chat to Notion" workflow
-
-When the user says "save this to Notion", "make this a task", "track this in Notion", "capture this conversation" mid-chat, read the conversation as a **tree, not a transcript**:
-
-1. **Identify the parent task.** -> `/agency-os suggest "<title>" --corpus=<inferred>`.
-2. **Open it for discussion immediately.** -> `/agency-os discuss <id>`.
-3. **Log the rationale and major decisions** as one or two distilled entries. -> `/agency-os log <id> "<distilled>"`.
-4. **Carve out subtasks** for each separable deliverable. -> `/agency-os add-subtask <id> "<title>"` per item.
-5. **Stop and ask before approving.** End with: `Captured to <url> in Discussion. Approve when you're ready to schedule.`
-
----
-
-## Command: `approve <id>`
-
-Promote a task from Discussion -> To-Do, cascading active children. **Requires explicit user authorization for the specific row or batch** (see "Authorization gates" above) — `approve` is a Gate-1 transition, never run it on the orchestrator's initiative.
-
-1. Sync preflight.
-2. Resolve `<id>`. Verify status is `Discussion` (or `Suggestion` — fast-track allowed). Refuse otherwise.
-3. **Cascade**: collect every descendant with status in `{Suggestion, Discussion}`. For each, set Status -> To-Do.
-4. Set the parent's Status -> To-Do. If `--priority` provided, set on the parent only.
-5. Append a `### <date> — approved` entry to the parent's Discussion log.
-6. Print: `-> To-Do: [<title>](<url>)  (cascaded N subtasks)`.
-
----
-
-## Command: `start <id>` (alias: `launch`)
-
-Move To-Do -> In Progress and emit the kickoff brief.
-
-1. Sync preflight.
-2. Resolve `<id>` (UUID, URL, or substring against To-Do rows).
-3. Verify status is `To-Do`. If `Suggestion` -> refuse with `discuss it first`. If `Discussion` -> refuse with `approve it first`. If `In Progress` -> soft-allow (re-emits brief).
-4. `notion-update-page` Status -> In Progress.
-5. **Assemble the kickoff brief, in this exact order:**
-
-   ```
-   ## Task
-   [<title>](<notion-url>)  [<corpus> / <priority> / type=<type>{ cadence=<cadence>}{ last_done=<date>} / effort=<effort>]
-
-   ## Description
-   <Description toggle body>
-
-   ## Subtasks (N)
-   - [Status]  <subtask title>  ->  /agency-os start <subtask-id>
-   - ...
-
-   ## Latest discussion entry  (of <K> total)
-   <most-recent entry verbatim>
-   (For older entries: /agency-os show <id> --section discussion --entry <date>)
-
-   ## Corpus: <name>
-   <Goal + Local guidance from the corpus page>
-
-   ## General guidance
-   <full general guidance page body>
-   ```
-
-6. End with: `Brief loaded. Proceed.`
-
-**Overfeed protection.** The brief never embeds:
-- Older discussion entries (only the latest; the rest are referenced by date)
-- Sibling tasks
-- Subtask bodies (only their titles + status)
-- The Done log
-
----
-
-## Command: `refresh`
-
-Auto-enumerate the agent-runnable To-Do set and write it to `state/todo-ids.json`. **No arguments.** The operator's only job upstream is to mark rows in Notion with `Exec=Agent`; `refresh` then fetches them via the Notion REST API and the sidecar is the enumeration substrate for `run`.
-
-The currently installed Notion MCP does not expose property-filtered enumeration of a data source, so this command shells out to `scripts/query-tasks.py`, which posts to `POST /v1/data_sources/{id}/query` with a server-side `Status="To-Do" AND Exec="Agent"` filter (Notion API version `2025-09-03`). The integration token (`NOTION_KEY` in `.env`) must be shared with the Tasks database.
-
-Run:
-
-```
-python .claude/skills/agency-os/scripts/query-tasks.py
-```
-
-The script:
-
-1. Loads `NOTION_KEY` from `.env` and `tasks_database.data_source_id` from `references/notion-pointers.json`.
-2. Queries the data source with the two-gate filter, paginating through `has_more`/`next_cursor`.
-3. For each result, fetches the page's block children once to extract a `description_preview` (the text between the `Description` H2 and the next H2; first 200 chars).
-4. Writes `.claude/skills/agency-os/state/todo-ids.json`:
-   ```json
-   {
-     "refreshed_at": "<iso>",
-     "tasks": [
-       {
-         "id": "<uuid>",
-         "url": "https://www.notion.so/...",
-         "title": "...",
-         "corpus": "General",
-         "priority": "3",
-         "effort": "M",
-         "type": "one-time",
-         "cadence": null,
-         "last_done": null,
-         "exec": "Agent",
-         "parent_task_id": null,
-         "has_todo_subtasks": false,
-         "description_preview": "<first 200 chars of Description>",
-         "dependencies": [
-           { "id": "<uuid>", "status": "Done" },
-           { "id": "<uuid>", "status": "To-Do" }
-         ]
-       }
-     ]
-   }
-   ```
-5. Prints a summary: `refreshed: <N> agent-runnable To-Do tasks -> state/todo-ids.json` followed by one line per task.
-
-**Failure modes.** The script aborts with a non-zero exit and an explanatory message if `NOTION_KEY` is missing, the integration is not shared with the database, or the API returns an error. The existing sidecar is overwritten only after the query succeeds end-to-end.
-
----
-
-## Command: `run [--go]`
-
-Batch-execute every task in `state/todo-ids.json` (which only contains rows with `Status == "To-Do"` AND `Exec == "Agent"`).
-
-**Claude Code:** The Haiku subagent builds the plan from the sidecar; the orchestrator picks a model per task at runtime and spawns execution agents.
-
-**Non-Claude harnesses:** The skill reads `config.json` to determine available models. If `config.json` doesn't exist, run `/agency-os init` first.
-
-**Auto-refresh.** `run` always calls `refresh` as its first step. If `refresh` fails, `run` aborts.
-
-### Plan phase (Haiku subagent)
-
-1. **Execute `scripts/query-tasks.py` via Bash** — this is mandatory and must happen before reading anything. Run `python .claude/skills/agency-os/scripts/query-tasks.py` and verify it exits 0. Only then read the freshly written `state/todo-ids.json`. Never read the sidecar without running the script first; the file on disk is always stale.
-2. **Dedup containers.** For each row with `has_todo_subtasks: true`, skip the parent — its work IS its subtasks.
-3. **Resolve dependencies.** Each sidecar row carries `dependencies: [{id, status}]`. For every dep:
-   - `status == "Done"` -> satisfied, ignore.
-   - dep `id` is in the current in-batch set -> record as an **intra-batch** edge.
-   - otherwise -> **external blocker**: drop from dispatch plan, collect into `blocked_deps[]`.
-4. **Topological stage assignment.** Build a DAG from intra-batch edges; assign each task a stage = `1 + max(stage of its in-batch deps)` (stage 1 = no in-batch deps). If a cycle is detected, abort.
-5. Sort within each stage: Priority asc, then overdue-recurring first, then Effort asc.
-6. Return the plan to the orchestrator as `stages: [[(id, title, corpus, effort, parent_id, description_preview), ...], ...]` plus `blocked_deps`.
-
-### Dispatch phase (orchestrator)
-
-**Before spawning any execution agent**, the orchestrator prints the plan outline (see `### Output` below) so the user sees which tasks are about to fire, in which stages, with which model per task. Then `dispatching stage 1...` and dispatch begins.
-
-Stages run **sequentially**: every task in stage N must finish before stage N+1 starts. Within a stage, tasks fan out in parallel.
-
-If any task in stage N closes as not Done, stage N+1 tasks that depend on it are dropped; added to the run summary's `blocked-deps`. Stage N+1 tasks whose deps all closed Done still run.
-
-**Claude Code:** The orchestrator picks a model and spawns an execution agent per task.
-
-**Non-Claude harnesses:** The skill reads `config.json` to determine which models are available, then suggests a complexity level (easy/med/hard) for each task based on the same heuristic.
-
-Picker heuristic (same on all harnesses):
-
-- **Haiku (easy)** — mechanical, template-driven, single-skill: form filings, recurring routines, log-and-close mutations, anything that's "fill a form / file a PR / post a comment from a known template."
-- **Sonnet (medium, default)** — substantive content/comms work, judgment-bearing audits, multi-step drafting, anything that needs a draft + revision pass.
-- **Opus (hard)** — strategic design, multi-skill orchestration, hard reasoning. Rare.
-
-Cap concurrency at **5** parallel execution agents **per stage**.
-
-### Execution-agent contract
-
-**Status discipline is non-negotiable.** Every spawned agent MUST leave the row in a terminal-for-this-run state before returning. No exceptions, no "leave it at In Progress for the operator to see":
-
-| Outcome | Final Status | Closer command |
-|---|---|---|
-| Full completion | `Done` (one-time) / `To-Do` w/ Last Done bumped (recurring) | `/agency-os done <id> --result-link <url> --note "..."` |
-| Partial completion | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "partial: <what's left>"` |
-| Blocked on operator action | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "blocked-operator: <what operator must do>"` |
-| Needs clarification | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "needs-clarification: <question>"` |
-| Failed (crash, tool error, dead-end) | `Discussion` | `/agency-os move <id> --to discussion` + `/agency-os log <id> "failed: <what broke>"` |
-
-Rationale: leaving a row at `In Progress` after the agent has stopped working is a lie about live state. The dashboard ends up cluttered with rows nothing is actually working on, and the next `run` can't tell whether to retry. `Discussion` is the correct holding pen for "an agent looked at this and could not close it" — the operator sees a real queue of things needing attention, and a follow-up `/agency-os approve <id>` is the explicit "try again" signal.
-
-Every spawned agent:
-
-1. Calls `/agency-os start <id>` to load the kickoff brief AND flip the row To-Do -> In Progress. This MUST be the first call; if the row is already In Progress (re-dispatch), `start` is idempotent and re-emits the brief.
-2. **Runnability check:** can this task plausibly be completed end-to-end by an agent, or does it require operator action (logging into a personal account, solving a captcha, clicking publish in a UI without API access)?
-   - If operator-only: call `/agency-os log <id> "blocked-operator: <one-line what the operator must do>"`, then `/agency-os move <id> --to discussion`, then emit the result report (step 6) with `status: blocked-operator`. Do not skip the status flip.
-3. Otherwise: execute the brief end-to-end.
-4. **Self-assessment.** Before closing: did I complete 100% of the acceptance criteria? Partial completions are **not** Done.
-5. **Auto-close — required, every outcome.** Pick the closer command from the table above and run it BEFORE emitting the result report. Verify the closer returned success. If the closer itself errors (e.g. Notion API hiccup), retry once; if it still fails, surface that in the result report's `summary` line as `status: failed` with the closer error appended — but still emit the report.
-6. **Result report — required, every run, no exceptions.** The agent's final chat output MUST be a single block in this exact format. Returning nothing is not allowed — not on success, not on failure, not on a crash mid-execution. If the agent hit an unrecoverable error before it could do anything meaningful, it still emits the block with `status: failed` and describes what happened. The `status:` line in the report must agree with the final Notion status: `done` <-> Done, every other status <-> Discussion.
-
-   ```
-   ### <task-id> — [<title>](<notion-url>)
-   status:       done | blocked-operator | needs-clarification | failed
-   model:        haiku | sonnet | opus
-   result-link:  <url or ->
-   summary:      <1-2 sentences: what was done, or what blocked it>
-   next-step:    <only if status != done; what operator should do next>
-
-   #### Full output
-   <verbatim full output of the agent's execution — every step taken, every tool result summary, every decision made. Do not truncate. If the agent produced no meaningful output beyond the header fields above, write "(no output)" here.>
-   ```
-
-**Orchestrator accountability.** After each stage, the orchestrator must confirm it received a result block from every agent it spawned. If an agent returned empty output or no output:
-- Treat it as `status: failed`, `summary: agent returned no output`, `full output: (agent returned no output)`.
-- Include it in the run summary under ❌ failed with that note.
-- Never omit a task from the summary because its agent was silent.
-
-### Parent-cascade rule
-
-When a **subtask** transitions To-Do -> In Progress (via `start`), the skill also flips its parent To-Do -> In Progress, if the parent is currently `To-Do`. The parent stays In Progress until the operator (or a deliberate later `/agency-os done <parent-id>`) closes it.
-
-### Output
-
-**The plan outline is ALWAYS printed first** — both in dry-run (without `--go`) and in real dispatch (with `--go`). The user must see what's about to fire before any agent spawns. In `--go` mode, after printing the outline, immediately proceed to dispatch — do not pause for confirmation (the `--go` flag already is the confirmation).
-
-Emit the outline as plain markdown (no fenced code block, so the links are clickable):
-
-**plan (`<N>` tasks, `<S>` stages):**
-
-- **stage 1** (`<K>` tasks, parallel):
-  - `[haiku]` [title](url)
-  - `[sonnet]` [title](url)
-  - ...
-- **stage 2** (`<L>` tasks, parallel, after stage 1):
-  - `[haiku]` [title](url) — deps: [dep-title](dep-url)
-  - ...
-
-If any tasks were dropped for external blockers, follow with:
-
-**blocked-deps (`<B>` tasks, not dispatched):**
-- [title](url) — missing: [dep-title](dep-url) (or raw dep-id if unknown)
-
-If `blocked-deps` is non-empty, also print: `note: <B> task(s) have dependencies outside this batch. Approve the missing deps or run them first, then /agency-os run again.`
-
-In dry-run mode, the outline IS the entire output — stop here, fire nothing.
-
-In `--go` mode, after the outline, print a one-line marker — `dispatching stage 1...` — then begin dispatch. After completion, the orchestrator emits two more sections:
-
-**1. Per-task detail** — one block per task executed, in stage order, verbatim from each execution agent's result report:
-
-```
----
-### <task-id> — [<title>](<notion-url>)
-status:       done | blocked-operator | needs-clarification | failed
-model:        haiku | sonnet | opus
-result-link:  <url or ->
-summary:      <...>
-next-step:    <...>
-
-#### Full output
-<verbatim agent output>
----
-```
-
-**2. Run summary** — after all per-task blocks. **Do NOT wrap the summary in a fenced code block** (```), because markdown links inside code fences render as literal text in Claude Code. Emit the summary as plain markdown so `[title](url)` links are clickable:
-
-**run summary (T queued, S stages):**
-- ✅ done (`<N>`): [title](url), [title](url), ...
-- 🟡 needs operator (`<M>`): [title](url), ...
-- 🟡 needs clarification (`<P>`): [title](url), ...
-- 🟡 blocked-deps (`<B>`): [title](url) (dep: [dep-title](dep-url)), ...
-- ❌ failed (`<Q>`): [title](url), ...
-
-Omit any row whose count is 0.
-
-`blocked-deps` entries also surface which dep blocked them. The orchestrator must emit both sections — the per-task detail AND the summary — every time `--go` is used.
-
----
-
-## Command: `done <id>`
-
-Close a task. Branches on `Type`.
-
-1. Sync preflight.
-2. Resolve `<id>` against rows in `In Progress` (preferred) or `To-Do` (allowed).
-3. **If `Type == "one-time"`:**
-   - Status -> Done; Done At -> today; Result Link -> `--result-link` if given.
-   - Append `### <date>: done — <note or "(no note)">` to the Done log.
-   - For subtasks: if **all** siblings are now `Done`, surface a nudge: `note: all subtasks of <parent> are done — consider /agency-os done <parent>`.
-4. **If `Type == "recurring"`:**
-   - Status -> To-Do (loops back).
-   - Last Done -> today.
-   - Append `### <date>: done — <note>` to the Done log.
-5. Print: `✅ Done: [<title>](<result-link>)` (if no result-link, omit the link and print title as plain text).
-
----
-
-## Command: `kill <id> [--reason "..."]`
-
-Terminal drop.
-
-1. Sync preflight.
-2. Resolve `<id>` against any non-terminal row.
-3. Status -> Killed. Append `### <date>: killed — <reason>` to the Done log.
-4. **Cascade**: for every descendant in non-terminal status, also set Status -> Killed with reason `parent killed`.
-5. Print: `✗ Killed: [<title>](<url>)  ({<reason>})  (cascaded N descendants)`.
-
----
-
-## Command: `next [N] [--corpus=<s>]`
-
-Show top N (default 3) To-Do tasks. **Does not execute.**
-
-1. Sync preflight.
-2. Filter: `Status == "To-Do"` and (if `--corpus` given) matching corpus and **`Parent Task IS NULL`** (only top-level).
-3. Sort by Priority (1 first; unset last), then Type (recurring with overdue Last Done first), then Created ascending.
-4. Print N rows: `<idx>. [<priority>][<corpus>][<type>{<cadence>}][<effort>]  [<title>](<url>)  (/agency-os start <id>)`.
-
-For recurring tasks, "overdue" = `now - Last Done` exceeds the cadence interval (daily=1d, weekly=7d, biweekly=14d, monthly=30d, quarterly=90d, yearly=365d).
-
----
-
-## Command: `status`
-
-Compact health overview.
-
-1. Sync preflight.
-2. Print:
-   - Counts per Status.
-   - Counts per Corpus x Status (small table).
-   - Top 5 Suggestions (most recent).
-   - Top 5 To-Do (highest priority + overdue recurring).
-   - In Progress rows (flag stale if older than 7 days).
-   - Done This Week count.
-   - Recurring tasks overdue count.
-
----
-
-## Command: `list <view> [--corpus=<s>]`
-
-Filtered listing. View in `suggestion | discussion | todo | inprogress | done | killed | recurring | all`.
-
-Output: `[Status][Type][Priority][Corpus]  [<title>](<url>)`.
-
-Subtasks are shown indented under their parent unless `--flat` is passed.
-
----
-
-## Command: `tree [--depth N] [--corpus=<s>] [--status=<s>]`
-
-Emit a compact indented view of the active task hierarchy and refresh `state/task-tree.json`. This is the primary tool for understanding the board's shape before adding new work.
-
-Default scope: all non-terminal rows (Suggestion, Discussion, To-Do, In Progress). `--status` filters to a specific status. `--corpus` narrows to one corpus. `--depth N` truncates at N levels (default: unlimited).
-
-1. Sync preflight (this also writes `task-tree.json` as a side-effect — see Sync section).
-2. Build the tree from the live result: group rows by `Parent Task`, render depth-indented.
-3. Output as plain markdown (links clickable, not a fenced block):
-
-   ```
-   [OS-12](url) "Top-level initiative"  [In Progress · General · L]
-     [OS-13](url) "Container subtask"  [To-Do · M]
-       [OS-14](url) "Leaf work item"  [To-Do · S]
-     [OS-15](url) "Another subtask"  [Suggestion · M]
-   [OS-16](url) "Unrelated top-level"  [To-Do · Recurring · M]
-   ```
-
-4. After the tree, print a one-line summary: `<N> tasks across <K> top-level roots  (snapshot written to state/task-tree.json)`.
-
-**When to call `tree`:**
-- At the start of any session where you'll be adding or reorganizing tasks.
-- Before any batch `suggest` operation, if `state/task-tree.json` is absent or you're unsure of the current shape.
-- Whenever the user asks "what's the structure", "show me the hierarchy", "how is this organized".
-
-`tree` is a read-only command — it never mutates Notion, only refreshes the local snapshot.
-
----
-
-## Command: `show <id> [--section ...] [--entry <date>]`
-
-Read a task's content without mutating state. Always include a `[<title>](<url>)` link at the top of the output before showing the requested content.
-
-- Default: row properties + Description + subtask titles.
-- `--section description`: Description only.
-- `--section discussion [--entry <date>]`: discussion log; one specific entry if `--entry` given.
-- `--section donelog`: done log entries.
-- `--section all`: everything (full page body + subtask titles).
-
----
-
-## Command: `update <id> ...`
-
-Mutate properties without changing status. All flags optional. Print: `✓ Updated: [<title>](<url>)`.
-
-`--notes "..."` replaces the Description toggle body. To **append** without replacing, use `log` instead.
-
-`--deps=<id1>,<id2>,...` replaces the Dependencies relation (each id resolved live via Notion; refuse if any is unknown). `--deps=none` clears it. Self-reference and cycles are refused.
-
-`--parent=<id>` reparents the task under `<id>` (resolved live; refuse if unknown, Done, or Killed; refuse self-reference and cycles). `--parent=none` removes the parent and promotes the row to top-level. Use cases: regrouping flat tasks under a newly created container, demoting a misplaced subtask back to root, swapping a task between umbrella initiatives.
-
----
-
-## Command: `move <id> --to <status>`
-
-Force-set status to any value (escape hatch). Bypasses normal flow gates. Logs a `### <date>: forced move <from> -> <to>` line to the Discussion log. Print: `-> <status>: [<title>](<url>)`.
+| `init` | `references/commands/init.md` |
+| `scaffold`, `add-corpus` | `references/commands/scaffold.md` |
+| `suggest` | `references/commands/suggest.md` |
+| `discuss` | `references/commands/discuss.md` |
+| `log` | `references/commands/log.md` |
+| `add-subtask` | `references/commands/add-subtask.md` |
+| `approve` | `references/commands/approve.md` |
+| `start` (alias `launch`) | `references/commands/start.md` |
+| `refresh` | `references/commands/refresh.md` |
+| `run` | `references/commands/run.md` |
+| `done` | `references/commands/done.md` |
+| `kill` | `references/commands/kill.md` |
+| `next` | `references/commands/next.md` |
+| `status` | `references/commands/status.md` |
+| `list` | `references/commands/list.md` |
+| `tree` | `references/commands/tree.md` |
+| `show` | `references/commands/show.md` |
+| `update` | `references/commands/update.md` |
+| `move` | `references/commands/move.md` |
+
+Shared rules: parent-vs-subtask-vs-log decisions, structure preflight protocol, "move this chat to Notion" workflow, and a worked example → `references/structuring-work.md`. The `suggest` and `add-subtask` specs reference this file.
 
 ---
 
@@ -977,53 +407,30 @@ When the user says these things in chat, the skill translates to commands:
 | "what's next" / "what should I work on" | `next [N]` |
 | "show me X" / "details on X" | `show <id>` |
 | "what's the status" / "where are we" | `status` |
+| "save this to Notion" / "capture this conversation" | "move this chat to Notion" workflow — see `references/structuring-work.md` |
 
-**The skill is the user's hands.** When in doubt, the agent asks: "Should I `<command equivalent>` for that?" and only mutates after confirmation. But trivial appends (a `log` entry during an open `discuss` session, an `add-subtask` from an explicit "we'll need to" moment) can be done without asking each time.
+**The skill is the user's hands.** When in doubt, the agent asks: "Should I `<command equivalent>` for that?" before mutating. Trivial appends (a `log` entry during an open `discuss`, an `add-subtask` from an explicit "we'll need to") can proceed without asking each time.
 
 ---
 
 ## Bootstrapping
 
-Fresh workspace — no template duplication required, the command creates everything:
-
-```
-/agency-os scaffold
-```
-
-If your Notion integration is shared with a specific page rather than the workspace root, pass that page:
-
-```
-/agency-os scaffold --parent=<page-id-or-url>
-```
-
-You can pass `--corpora "Name1,Name2,Name3"` to scaffold with custom corpus names instead of the defaults (`General`, `Recurring`). You can always add more later with `/agency-os add-corpus "<name>"`.
-
-Migrating from an existing Notion setup:
-
-```
-/agency-os scaffold
-# then read existing pages, parse content, and:
-#   - bulk /agency-os suggest each parsed item with --corpus inferred from heading
-#   - copy resource pages to the new Resources page
-#   - archive the old structure
-# this is a one-shot manual migration; the skill does not provide a generic import command,
-# because the source format varies and parsing requires per-source judgment.
-```
+Fresh setup and migration from a prior hub: see `references/bootstrapping.md`.
 
 ---
 
 ## What this skill does NOT do
 
-- **Does not auto-execute To-Do items.** `next` shows; only `start` (after explicit invocation) loads the brief and flips status.
-- **Does not auto-promote rows to To-Do.** Every transition into To-Do requires explicit user authorization for that row or batch (Gate 1). The orchestrator never cascade-approves a subtree on its own initiative, even when a downstream command would "need" rows in To-Do to proceed.
-- **Does not mark rows `Exec=Agent` without explicit authorization.** Exec is operator-owned (Gate 2). No subagent, no command, no natural-language path may set Exec=Agent unless the user named the row(s) and asked for it.
-- **Does not append `--go` to a `run` the user didn't write.** Dry-run is the default; the `--go` flag is the user's explicit dispatch signal (Gate 3).
-- **Does not write content, deploy, or run any other skill.** It mutates Notion. The brief may **point** an agent at another skill, but this skill never invokes one.
-- **Does not delete content.** `kill` is terminal but archival; the row remains in Notion. To truly remove, archive in Notion manually.
+- **Does not auto-execute To-Do items.** `next` shows; only `start` flips status and loads brief.
+- **Does not auto-promote rows to To-Do.** Every To-Do transition requires explicit user authorization (Gate 1).
+- **Does not mark rows `Exec=Agent` without explicit authorization** (Gate 2).
+- **Does not append `--go` to a `run` the user didn't write** (Gate 3).
+- **Does not write content, deploy, or run any other skill.** The brief may point at another skill.
+- **Does not delete content.** `kill` is archival; the row remains.
 - **Does not commit or push to git** beyond `notion-pointers.json` (which scaffold writes).
-- **Does not enforce subtask completion before parent done.** It surfaces a nudge, not a refusal.
-- **Does not de-dup beyond Title-Jaccard 0.8 on `suggest`.** Manual rows added via Notion UI bypass the check.
-- **Does not auto-archive old discussion entries.** The Discussion log grows unbounded on the page; the brief assembler bounds the agent's context (latest entry only, older ones referenced).
+- **Does not enforce subtask completion before parent done.** Surfaces a nudge, not a refusal.
+- **Does not de-dup beyond Title-Jaccard 0.8 on `suggest`.** Manual Notion-UI rows bypass.
+- **Does not auto-archive old discussion entries.** Brief assembler bounds agent context (latest entry only).
 - **Does not run more than one `start` per task at a time.** `In Progress` is the lock.
 
 ---
@@ -1031,10 +438,10 @@ Migrating from an existing Notion setup:
 ## One-command summary
 
 ```
-/agency-os suggest -> discuss -> log/add-subtask (clarify) -> approve -> start (loads brief) -> done
-                                                                          ^                     |
-                                                                          |  (recurring loop)   |
-                                                                          +--------------------+
+/agency-os suggest -> discuss -> log/add-subtask (clarify) -> approve -> start -> done
+                                                                          ^       |
+                                                                          |recur  |
+                                                                          +-------+
 ```
 
-Sync runs as preflight, but reads come from the local mirror at `state/tasks.json` — refreshed incrementally by `sync-tasks.py` and patched write-through on every MCP mutation. Notion is canonical. The mirror is throwaway and gitignored. The pointer file is the only repo binding. The DB grid stays clean; details fold; briefs stay bounded.
+Sync runs as preflight via `scripts/sync-tasks.py`, refreshing the local mirror at `state/tasks.json` incrementally. Notion is canonical; the mirror is the read path; the pointer file is the only repo binding. The DB grid stays clean; details fold; briefs stay bounded.
