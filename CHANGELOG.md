@@ -8,6 +8,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-20
+
+### Added
+- **`/agency-os tree` command** — compact indented hierarchy snapshot of all active tasks; also writes `state/task-tree.json` for zero-cost offline reads.
+- **`state/task-tree.json` snapshot** — rebuilt on every `sync`, `tree`, or `suggest`; agents read it for free (no MCP round-trip) before creating or reorganising tasks.
+- **Structure preflight in `suggest`** — when `--parent` is omitted, the subagent scans the tree snapshot for an obvious umbrella and prompts for confirmation before creating a root-level row; bypassed with new `--force-top-level` flag.
+- **STRUCTURE CHECK block in orchestrator dispatch prompt** — subagents are explicitly instructed to read `task-tree.json` before any batch suggest operation.
+- **"Task structure — orient before adding" section in General Guidance** — four-step orient protocol surfaces in every kickoff brief.
+
+### Changed
+- **Parent discipline section rewritten as a protocol** — three explicit steps (read snapshot → scan → propose tree in chat), updated decision matrix, and clarification that `suggest`'s preflight is a safety net for single rows while the orchestrator owns batch planning.
+
 ## [0.1.10] - 2026-05-13
 
 ### Changed
