@@ -40,7 +40,8 @@ A command entry needs:
 
 Guidelines:
 - Keep commands single-purpose. A command that does two unrelated things is two commands.
-- Every mutating command needs a sync preflight (call `notion-fetch` live; abort if the call fails — never fall back to a local snapshot).
+- Every mutating command needs a sync preflight: run `python .claude/skills/agency-os/scripts/sync-tasks.py` to refresh `state/tasks.json`, then read state from that file. Abort the mutation if the sync call fails. Read-only commands may proceed against the stale mirror with a warning.
+- Every mutating command must also write-through patch the local mirror row in `state/tasks.json` using the MCP response payload, so the next command sees current state without another sync round-trip.
 - Every command that touches Notion must go through the MCP tools (`notion-update-page`, `notion-create-pages`, etc.) - never write Notion API calls inline in a prompt.
 - Output format matters: the orchestrator and the run summary parser both rely on the exact output lines. Don't change existing output formats without updating callers.
 

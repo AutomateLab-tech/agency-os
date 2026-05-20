@@ -53,7 +53,7 @@ Agent({
   description: "Run /agency-os <command>",
   subagent_type: "general-purpose",
   model: "sonnet",
-  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nUse medium reasoning effort — think through ID resolution, dedup checks, and brief assembly carefully, but don't over-deliberate on mechanical mutations.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (call notion-fetch live — never read from any local cache file), resolve IDs against the live Notion result, mutate Notion via the Notion MCP, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. Claude Code renders markdown but not HTML, so HTML anchors show up as literal text. If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nSTRUCTURE CHECK (for `suggest` without `--parent`, and for any batch suggest): Before creating any row, read `.claude/skills/agency-os/state/task-tree.json` for the current active task hierarchy (written by the most recent `sync` or `tree` run). If the file is absent, call `/agency-os tree` first. Scan In-Progress and To-Do rows for an obvious umbrella parent. If a candidate exists with high confidence, surface it and require the orchestrator to confirm before proceeding. Never silently create a top-level row when an obvious parent exists. Full rules: SKILL.md under `Structuring work → Parent discipline`.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
+  prompt: "Run the agency-os skill for: /agency-os <command> <args>.\n\nUse medium reasoning effort — think through ID resolution, dedup checks, and brief assembly carefully, but don't over-deliberate on mechanical mutations.\n\nRead .claude/skills/agency-os/SKILL.md and execute that exact command end-to-end: sync preflight (run `python .claude/skills/agency-os/scripts/sync-tasks.py` via Bash — this incrementally refreshes the local mirror at `state/tasks.json`; do NOT call notion-fetch on the full data source as a default read path), resolve IDs against the local mirror, mutate Notion via the Notion MCP, write-through patch the mirror with the MCP response in the same step, and return the same output format the skill specifies (the brief for `start`, the `+ Suggestion: ... -> url` line for `suggest`, etc.). All task/result links must be formatted as CommonMark markdown links — `[title](url)` — never HTML `<a>` tags and never a bare URL. Claude Code renders markdown but not HTML, so HTML anchors show up as literal text. If the command is `start`, also emit the full kickoff brief verbatim. If anything fails (sync, MCP call, ID resolution), stop and report — do not guess.\n\nSTRUCTURE CHECK (for `suggest` without `--parent`, and for any batch suggest): Before creating any row, read `.claude/skills/agency-os/state/task-tree.json` for the current active task hierarchy (written by the most recent `sync` or `tree` run). If the file is absent, call `/agency-os tree` first. Scan In-Progress and To-Do rows for an obvious umbrella parent. If a candidate exists with high confidence, surface it and require the orchestrator to confirm before proceeding. Never silently create a top-level row when an obvious parent exists. Full rules: SKILL.md under `Structuring work → Parent discipline`.\n\nYOU MUST ALWAYS PRODUCE OUTPUT. Never return silently. On success: the skill's standard output. On failure: one paragraph describing exactly what failed, what was attempted, and what state Notion was left in. Returning nothing is not an option."
 })
 ```
 
@@ -193,11 +193,25 @@ If `start` crashes, the row sits at In Progress. Manual recovery: `/agency-os mo
 
 ---
 
-## Sync — preflight on every command
+## Sync — local mirror is the read path
 
-Before every command, call `notion-fetch <tasks_data_source_id>` (from `notion-pointers.json`) to get live data from Notion. Resolve `<id-or-substring>` against the live result. Never read from `notion-cache.json` or any local snapshot. Mutations also target Notion directly.
+Every command reads from a **local JSON mirror** at `state/tasks.json`, not from live Notion. The mirror is kept fresh by an incremental delta sync that only fetches pages whose `last_edited_time` advanced since the last sync — typically a handful of rows per command, often zero. Live `notion-fetch` of the full data source is the escape hatch, not the default. Token cost per command drops by roughly an order of magnitude after the first bootstrap.
 
-**Tree snapshot side-effect.** After a successful `notion-fetch`, write `state/task-tree.json` — a compact nested representation of all non-terminal tasks (Suggestion / Discussion / To-Do / In Progress), structured as a tree via `Parent Task`. This file is the free structure reference for agents: any subsequent `suggest` call, orchestrator planning step, or session warm-up can read it off-disk without a fresh MCP round-trip. The file is gitignored (mutable state); it is always rebuilt from live data, never from a prior snapshot.
+**Preflight (every command).** Run:
+
+```bash
+python .claude/skills/agency-os/scripts/sync-tasks.py
+```
+
+via the Bash tool. The script reads `NOTION_KEY` from `.env`, pulls the data source ID from `notion-pointers.json`, queries Notion with a `last_edited_time` filter, parses each changed page's body (Description / Discussion log / Done log toggleable H2 sections), and upserts into `state/tasks.json`. On first run (no mirror file) it does a full bootstrap. Then resolve `<id-or-substring>` against `state/tasks.json`.
+
+**Write-through on mutations.** Every command that mutates Notion (via the Notion MCP — `notion-create-pages`, `notion-update-page`, etc.) MUST patch the corresponding row in `state/tasks.json` in the same step, using the response payload from the MCP call. This keeps the mirror authoritative across the same session and prevents the next command from re-syncing the row we just wrote. The shape of each row is what `sync-tasks.py` produces (see schema below).
+
+**Escape hatches.**
+- `python scripts/sync-tasks.py --full` — full rebuild (e.g. after schema changes or suspected drift).
+- `notion-fetch <data_source_id>` directly — only when you need a property the mirror doesn't carry, or when verifying the mirror against live data. Do not make this the default; the whole point is to stop dragging the full DB into LLM context on every command.
+
+**Tree snapshot side-effect.** After every successful sync, also write `state/task-tree.json` — a compact nested representation of all non-terminal tasks (Suggestion / Discussion / To-Do / In Progress), structured as a tree via `Parent Task`. This is the free structure reference for `suggest` preflight and orchestrator planning. Both files are gitignored.
 
 ```json
 {
@@ -218,7 +232,31 @@ Before every command, call `notion-fetch <tasks_data_source_id>` (from `notion-p
 }
 ```
 
-If `notion-fetch` fails (Notion API down, OAuth expired), print `sync failed: <reason>` and abort — do not fall back to any cached file. Do not write or update `task-tree.json` on a failed sync.
+**Mirror schema (`state/tasks.json`).**
+
+```json
+{
+  "synced_at": "<iso>",
+  "previous_synced_at": "<iso|null>",
+  "tasks": [
+    {
+      "notion_id": "<uuid>", "task_id": "OS-12", "url": "<url>",
+      "title": "...", "status": "To-Do",
+      "type": "one-time", "cadence": null,
+      "corpus": "General", "priority": "2", "impact": "high",
+      "effort": "M", "exec": "Agent", "tags": [],
+      "parent_task_id": "<uuid|null>", "dependency_ids": ["<uuid>"],
+      "last_done": null, "done_at": null, "result_link": null,
+      "created_time": "<iso>", "last_edited_time": "<iso>",
+      "description": "<first 600 chars of Description section>",
+      "latest_discussion_entry": "<most recent ### entry, truncated>",
+      "last_done_log_entry": "<most recent ### entry, truncated>"
+    }
+  ]
+}
+```
+
+If `sync-tasks.py` fails (Notion API down, OAuth expired, network error), print `sync failed: <reason>` and abort the command — do not fall back to a stale mirror for mutations. Read-only commands (`list`, `next`, `show`, `status`, `tree`) MAY proceed against the existing mirror with a `sync failed; reading stale mirror` warning; mutations (`suggest`, `discuss`, `approve`, `start`, `done`, `kill`, `update`, `move`, `log`, `add-subtask`) MUST abort.
 
 ---
 
@@ -999,4 +1037,4 @@ Migrating from an existing Notion setup:
                                                                           +--------------------+
 ```
 
-Sync runs as preflight. Notion is canonical. The pointer file is the only repo binding. The DB grid stays clean; details fold; briefs stay bounded.
+Sync runs as preflight, but reads come from the local mirror at `state/tasks.json` — refreshed incrementally by `sync-tasks.py` and patched write-through on every MCP mutation. Notion is canonical. The mirror is throwaway and gitignored. The pointer file is the only repo binding. The DB grid stays clean; details fold; briefs stay bounded.

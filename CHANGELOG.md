@@ -8,6 +8,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-05-20
+
+### Added
+- **Local mirror at `state/tasks.json`** — every command now reads task state from a local JSON file kept fresh by incremental delta sync, instead of pulling the entire Notion data source into LLM context on every invocation. After the first bootstrap, a typical command syncs zero or a handful of changed rows. Roughly an order of magnitude less context per command for boards with hundreds of tasks.
+- **`scripts/sync-tasks.py`** — incremental sync engine. Reads `NOTION_KEY` from `.env`, queries the Notion data source with a `last_edited_time` filter, parses each changed page's three toggleable H2 sections (Description, Discussion log, Done log) into brief-ready fields, and upserts into `state/tasks.json`. `--full` flag forces a bootstrap-style rebuild. Uses `urllib` only — no external Python deps. Retries transient 429/5xx with backoff.
+- **Mirror schema documented in SKILL.md** — one row per task with all DB properties plus `description`, `latest_discussion_entry`, and `last_done_log_entry` truncated for bounded brief assembly.
+
+### Changed
+- **Sync section in SKILL.md rewritten** — the read path is now mirror-first. `notion-fetch` against the full data source is documented as an escape hatch, not the default.
+- **Write-through rule** — every command that mutates Notion MUST patch the corresponding row in `state/tasks.json` in the same step using the MCP response payload, so the mirror stays authoritative within the session.
+- **Failure handling split by intent** — when sync fails, read-only commands (`list`, `next`, `show`, `status`, `tree`) may proceed against the stale mirror with a warning; mutations must abort.
+
 ## [0.2.0] - 2026-05-20
 
 ### Added
