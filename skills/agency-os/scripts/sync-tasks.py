@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 NOTION_API_VERSION = "2025-09-03"
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILL_DIR = Path(__file__).resolve().parents[1]
 POINTERS = SKILL_DIR / "references" / "notion-pointers.json"
 MIRROR = SKILL_DIR / "state" / "tasks.json"

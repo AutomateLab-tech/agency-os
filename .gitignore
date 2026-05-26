@@ -3,10 +3,10 @@ node_modules/
 tmp/
 
 # agency-os runtime state (generated, never committed)
-.claude/skills/agency-os/state/todo-ids.json
-.claude/skills/agency-os/state/task-tree.json
-.claude/skills/agency-os/state/tasks.json
-.claude/skills/agency-os/references/notion-cache.json
+skills/agency-os/state/todo-ids.json
+skills/agency-os/state/task-tree.json
+skills/agency-os/state/tasks.json
+skills/agency-os/references/notion-cache.json
 
 # Claude Code per-user settings (machine-local, never committed)
 .claude/settings.local.json

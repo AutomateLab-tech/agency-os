@@ -6,6 +6,6 @@
   "license": "MIT",
   "homepage": "https://github.com/AutomateLab-tech/agency-os",
   "skills": [
-    "./.claude/skills/agency-os/"
+    "./skills/agency-os/"
   ]
 }

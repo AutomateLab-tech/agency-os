@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 NOTION_API_VERSION = "2025-09-03"
-# Path layout: scripts/ -> agency-os/ -> skills/ -> .claude/ -> repo root
-REPO_ROOT = Path(__file__).resolve().parents[4]
+# Path layout: scripts/ -> agency-os/ -> skills/ -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILL_DIR = Path(__file__).resolve().parents[1]
 POINTERS = SKILL_DIR / "references" / "notion-pointers.json"
 SIDECAR = SKILL_DIR / "state" / "todo-ids.json"

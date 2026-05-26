@@ -4,7 +4,7 @@ Cursor doesn't have a native plugin system, so agency-os loads as a project rule
 
 ## Install
 
-1. Clone or copy the agency-os repo into your project (or vendor `.claude/skills/agency-os/` into your workspace).
+1. Clone or copy the agency-os repo into your project (or vendor `skills/agency-os/` from this repo to `.claude/skills/agency-os/` in your workspace).
 2. Add a Cursor rule that points at the skill spec. Create `.cursor/rules/agency-os.mdc`:
 
    ```mdc

@@ -4,7 +4,7 @@ Both harnesses support custom instructions plus MCP servers, which is everything
 
 ## Install
 
-1. Vendor `.claude/skills/agency-os/` into your project (copy it from this repo).
+1. Vendor the skill into your project: copy `skills/agency-os/` from this repo to `.claude/skills/agency-os/` in your project.
 2. Add a custom-instructions block (Cline: settings -> custom instructions; Continue: `.continue/config.json` or workspace settings) pointing the agent at the spec:
 
    ```

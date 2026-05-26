@@ -10,7 +10,7 @@ If your harness can (a) load a long system prompt or instruction file and (b) ca
 
 ## Wiring it up
 
-1. Vendor `.claude/skills/agency-os/` into your project.
+1. Vendor the skill into your project: copy `skills/agency-os/` from this repo to `.claude/skills/agency-os/` in your project.
 
 2. Add this to your agent's system prompt (or custom instructions):
 

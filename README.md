@@ -56,7 +56,7 @@ That's it. Scaffold builds the Hub, Tasks database, corpus pages, and all linked
 
 ## Install
 
-agency-os ships as a Claude Code plugin and as a portable skill spec for every other harness. The core contract (`.claude/skills/agency-os/SKILL.md`) is the same everywhere; only the wrapper changes.
+agency-os ships as a Claude Code plugin and as a portable skill spec for every other harness. The core contract (`skills/agency-os/SKILL.md`) is the same everywhere; only the wrapper changes.
 
 | Harness | Format | Setup |
 |---|---|---|

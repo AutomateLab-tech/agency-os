@@ -28,7 +28,7 @@ You can add as many corpora as you need. They're cheap to create and useful for 
 
 ## Adding new commands
 
-The skill spec at `.claude/skills/agency-os/SKILL.md` is the executable spec. Every command definition lives in that file. Adding a new command means editing SKILL.md.
+The skill spec at `skills/agency-os/SKILL.md` is the executable spec. Every command definition lives in that file. Adding a new command means editing SKILL.md.
 
 A command entry needs:
 
@@ -109,7 +109,7 @@ If you want to filter on different criteria - say, only tasks in a specific corp
 agency-os is a Claude Code plugin. To list it on the Claude Code plugin marketplace:
 
 1. Ensure the repo has a valid `plugin.json` (or equivalent manifest, per the current Claude Code plugin spec at https://docs.claude.com/en/docs/claude-code/plugins).
-2. The skill entry point must be in `.claude/skills/agency-os/SKILL.md`. The plugin manifest points to this file.
+2. The skill entry point must be in `skills/agency-os/SKILL.md`. The plugin manifest points to this file.
 3. Register at the Claude Code plugin registry. <!-- TODO: link to the registry submission page once published -->
 4. Once listed, operators can install with `/plugin install agency-os` (short name) rather than the full repo URL.
 
