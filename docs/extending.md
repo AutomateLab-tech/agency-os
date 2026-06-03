@@ -113,8 +113,8 @@ agency-os is a Claude Code plugin. To list it on the Claude Code plugin marketpl
 3. Register at the Claude Code plugin registry. <!-- TODO: link to the registry submission page once published -->
 4. Once listed, operators can install with `/plugin install agency-os` (short name) rather than the full repo URL.
 
-Until the repo is public and the plugin is listed, share it via the full GitHub URL:
+Share it via the `owner/repo` shorthand:
 
 ```
-/plugin install https://github.com/ratamaha-git/agency-os
+/plugin install ratamaha-git/agency-os
 ```

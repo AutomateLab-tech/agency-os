@@ -5,7 +5,7 @@ Native plugin. Slash commands work out of the box, and per-command Notion mutati
 ## Install
 
 ```
-/plugin install https://github.com/ratamaha-git/agency-os
+/plugin install ratamaha-git/agency-os
 ```
 
 The plugin registers `skills/agency-os/SKILL.md` as a skill and exposes every `/agency-os <command>` as a slash command in your current project.

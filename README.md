@@ -60,7 +60,7 @@ agency-os ships as a Claude Code plugin and as a portable skill spec for every o
 
 | Harness | Format | Setup |
 |---|---|---|
-| **Claude Code** | Plugin | `/plugin install https://github.com/ratamaha-git/agency-os` |
+| **Claude Code** | Plugin | `/plugin install ratamaha-git/agency-os` |
 | **Cursor** | Skill / rules | [docs/harnesses/cursor.md](docs/harnesses/cursor.md) |
 | **Cline / Continue** | Custom instructions | [docs/harnesses/cline.md](docs/harnesses/cline.md) |
 | **Any MCP-capable agent** | Generic spec | [docs/harnesses/generic.md](docs/harnesses/generic.md) |
